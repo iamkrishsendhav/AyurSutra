@@ -4,7 +4,7 @@ const User = require('../models/User');
 
 async function updateUserPhone(email, phoneNumber) {
     try {
-        await mongoose.connect(process.env.MONGO_URI);
+        await mongoose.connect(process.env.MONGODB_URI);
         console.log('Connected to MongoDB');
 
         // Remove 'whatsapp:' prefix if present

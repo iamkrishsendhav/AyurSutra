@@ -8,8 +8,6 @@ const session = require('express-session');
 
 const app = express();
 
-// ---------------- Connect Database ----------------
-connectDB();
 
 // ---------------- Middleware ----------------
 app.use(express.json());
@@ -67,12 +65,23 @@ app.use('/admin', require('./routes/adminNotifications'));
 // Debug routes (temporary, for auth debugging)
 app.use('/debug', require('./routes/debugRoutes'));
 
-// Start notification worker (sends email/SMS/in-app reminders)
-const { startNotificationWorker } = require('./workers/notificationWorker');
-startNotificationWorker();
+// Start only after MongoDB is ready so routes and background jobs cannot query
+// against a disconnected Mongoose instance.
+const start = async () => {
+  try {
+    await connectDB();
+    const PORT = process.env.PORT || 5000;
+    const server = app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+    const { startNotificationWorker } = require('./workers/notificationWorker');
+    startNotificationWorker();
+    return server;
+  } catch (err) {
+    process.exitCode = 1;
+    return null;
+  }
+};
 
-// ---------------- Server ----------------
-const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log(`✅ Server running on port ${PORT}`));
+if (require.main === module) start();
+module.exports = { app, start };
 
 
