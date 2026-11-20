@@ -1,7 +1,7 @@
 import React from "react";
-import NotificationPreferences from "./notifications/NotificationPreferences";
-import NotificationsList from "./notifications/NotificationsList";
-import PrecautionGuidelines from "./notifications/PrecautionGuidelines";
+import NotificationPreferences from "./Notifications/NotificationPreferences.jsx";
+import NotificationsList from "./Notifications/NotificationsList.jsx";
+import PrecautionGuidelines from "./Notifications/PrecautionGuidelines.jsx";
 import ErrorBoundary from './ErrorBoundary';
 import ChatPanel from './ChatPanel';
 
