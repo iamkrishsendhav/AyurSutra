@@ -178,7 +178,8 @@ const SignupPage = ({ onSwitchToLogin, onSignupSuccess, onBackToLanding }) => {
           className={`absolute inset-0 bg-gradient-to-br ${bgGradient}`}
         ></div>
         <div
-          className={`absolute inset-0 bg-[url('${patternUrl}')] bg-repeat opacity-20`}
+          className="absolute inset-0 bg-repeat opacity-20"
+          style={{ backgroundImage: `url('${patternUrl}')` }}
         ></div>
         {/* Accent blurred circles */}
         <div

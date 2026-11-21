@@ -424,7 +424,7 @@ This treatment is particularly effective for skin disorders, enlarged liver, spl
 
           {/* Decorative Background */}
           <div className="absolute inset-0">
-            <div className="absolute inset-0 bg-[url('/patterns/herbs-bg.png')] opacity-5 animate-pulse-slow"></div>
+            <div className="absolute inset-0 bg-[url('/patterns/herbs-bg.svg')] opacity-5 animate-pulse-slow"></div>
           </div>
 
           <div className="relative">
@@ -592,7 +592,7 @@ This treatment is particularly effective for skin disorders, enlarged liver, spl
               <h2 className="text-4xl md:text-5xl font-display mb-4 relative inline-block">
                 <span className="relative">
                   Essential Elements
-                  <div className="absolute -top-6 left-1/2 transform -translate-x-1/2 w-12 h-12 bg-[url('/patterns/mandala-small.png')] opacity-10"></div>
+                  <div className="absolute -top-6 left-1/2 transform -translate-x-1/2 w-12 h-12 bg-[url('/patterns/mandala-small.svg')] opacity-10"></div>
                 </span>
                 <span className="bg-gradient-to-r from-brand-red to-brand-teal bg-clip-text text-transparent">
                   {" "}
@@ -684,7 +684,7 @@ This treatment is particularly effective for skin disorders, enlarged liver, spl
         <div className="mt-32 mb-20 relative">
           {/* Background Elements */}
           <div className="absolute inset-0">
-            <div className="absolute inset-0 bg-[url('/patterns/lotus-bg.png')] opacity-5"></div>
+            <div className="absolute inset-0 bg-[url('/patterns/lotus-bg.svg')] opacity-5"></div>
           </div>
 
           {/* Content Container */}
@@ -694,7 +694,7 @@ This treatment is particularly effective for skin disorders, enlarged liver, spl
               <h2 className="text-4xl md:text-5xl font-display mb-4 relative inline-block">
                 <span className="relative">
                   The Path to
-                  <div className="absolute -top-6 left-1/2 transform -translate-x-1/2 w-12 h-12 bg-[url('/patterns/mandala-small.png')] opacity-10"></div>
+                  <div className="absolute -top-6 left-1/2 transform -translate-x-1/2 w-12 h-12 bg-[url('/patterns/mandala-small.svg')] opacity-10"></div>
                 </span>
                 <span className="bg-gradient-to-r from-brand-red to-brand-teal bg-clip-text text-transparent">
                   {" "}
@@ -867,7 +867,7 @@ This treatment is particularly effective for skin disorders, enlarged liver, spl
 
       {/* Ayurvedic Wisdom Section */}
       <section className="py-24 relative overflow-hidden">
-        <div className="absolute inset-0 bg-[url('/patterns/mandala-pattern.png')] opacity-5"></div>
+        <div className="absolute inset-0 bg-[url('/patterns/mandala-bg.svg')] opacity-5"></div>
 
         {/* Section Header */}
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative mb-16">
@@ -875,7 +875,7 @@ This treatment is particularly effective for skin disorders, enlarged liver, spl
             <h2 className="text-4xl md:text-5xl font-display mb-4 relative inline-block">
               <span className="relative">
                 Understanding
-                <div className="absolute -top-6 left-1/2 transform -translate-x-1/2 w-12 h-12 bg-[url('/patterns/mandala-small.png')] opacity-10"></div>
+                <div className="absolute -top-6 left-1/2 transform -translate-x-1/2 w-12 h-12 bg-[url('/patterns/mandala-small.svg')] opacity-10"></div>
               </span>
               <span className="bg-gradient-to-r from-brand-red to-brand-teal bg-clip-text text-transparent">
                 {" "}
@@ -1570,7 +1570,7 @@ This treatment is particularly effective for skin disorders, enlarged liver, spl
       <section id="features" className="py-20 relative overflow-hidden">
         {/* Decorative Background */}
         <div className="absolute inset-0">
-          <div className="absolute inset-0 bg-[url('/patterns/lotus-bg.png')] opacity-5"></div>
+          <div className="absolute inset-0 bg-[url('/patterns/lotus-bg.svg')] opacity-5"></div>
         </div>
 
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative">
@@ -1586,7 +1586,7 @@ This treatment is particularly effective for skin disorders, enlarged liver, spl
             <h2 className="text-5xl md:text-6xl font-display text-brand-sage-dark mb-6 relative">
               <span className="relative inline-block">
                 Essential Elements of
-                <div className="absolute -top-3 left-1/2 transform -translate-x-1/2 w-12 h-12 bg-[url('/patterns/mandala-small.png')] opacity-10"></div>
+                <div className="absolute -top-3 left-1/2 transform -translate-x-1/2 w-12 h-12 bg-[url('/patterns/mandala-small.svg')] opacity-10"></div>
               </span>
               <span className="bg-gradient-to-r from-brand-red to-brand-teal bg-clip-text text-transparent">
                 {" "}
@@ -1659,8 +1659,8 @@ This treatment is particularly effective for skin disorders, enlarged liver, spl
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-12 items-center">
             <div className="relative">
               {/* Decorative Corner Elements */}
-              <div className="absolute -top-4 -left-4 w-12 h-12 bg-[url('/patterns/corner-mandala.png')] opacity-20"></div>
-              <div className="absolute -bottom-4 -right-4 w-12 h-12 bg-[url('/patterns/corner-mandala.png')] opacity-20 transform rotate-180"></div>
+              <div className="absolute -top-4 -left-4 w-12 h-12 bg-[url('/patterns/corner-mandala.svg')] opacity-20"></div>
+              <div className="absolute -bottom-4 -right-4 w-12 h-12 bg-[url('/patterns/corner-mandala.svg')] opacity-20 transform rotate-180"></div>
 
               {/* Content */}
               <div className="relative">
@@ -1780,7 +1780,7 @@ This treatment is particularly effective for skin disorders, enlarged liver, spl
       <section id="testimonials" className="py-20 relative overflow-hidden">
         {/* Decorative Background */}
         <div className="absolute inset-0">
-          <div className="absolute inset-0 bg-[url('/patterns/herbs-bg.png')] opacity-5"></div>
+          <div className="absolute inset-0 bg-[url('/patterns/herbs-bg.svg')] opacity-5"></div>
         </div>
 
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 relative">
