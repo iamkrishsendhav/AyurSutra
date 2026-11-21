@@ -5,6 +5,7 @@ const client = twilio(
     process.env.TWILIO_ACCOUNT_SID,
     process.env.TWILIO_AUTH_TOKEN
 );
+const whatsappFrom = process.env.TWILIO_PHONE_NUMBER || process.env.TWILIO_WHATSAPP_NUMBER || process.env.TWILIO_WHATSAPP_FROM;
 
 /**
  * Send a WhatsApp message to a specified number
@@ -15,12 +16,12 @@ const client = twilio(
 const sendWhatsAppMessage = async (to, message) => {
     try {
         console.log('Attempting to send WhatsApp message:', {
-            from: process.env.TWILIO_PHONE_NUMBER,
+            from: whatsappFrom,
             to: `whatsapp:${to}`,
             messageLength: message.length
         });
         const response = await client.messages.create({
-            from: process.env.TWILIO_PHONE_NUMBER,
+            from: whatsappFrom,
             to: `whatsapp:${to}`, // Ensure the number has WhatsApp prefix
             body: message
         });

@@ -2078,8 +2078,8 @@ This treatment is particularly effective for skin disorders, enlarged liver, spl
               </span>
             </div>
             <p className="text-sm text-gray-400">
-              &copy; 2025 आयुरसूत्र | AyurSutra. सर्वाधिकार सुरक्षित | All
-              rights reserved. <br />
+              &copy; 2026 आयुरसूत्र | AyurSutra. सर्वाधिकार सुरक्षित | All
+              rights reserved.  -Krish <br />
               <span className="text-brand-sage-light">
                 Made with ❤️ for the global Ayurvedic community
               </span>

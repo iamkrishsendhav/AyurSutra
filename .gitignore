@@ -13,3 +13,6 @@ server/dist/
 
 *.log
 npm-debug.log*
+.login-visual-check/
+
+.login-visual-check/

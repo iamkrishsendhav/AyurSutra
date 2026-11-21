@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import authFetch from '../utils/apiClient';
 import { User, MapPin, Phone, Heart, Calendar, Users, Save, Edit3, Shield, CheckCircle, Clock, XCircle } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext.jsx';
+import AvailabilityEditor from './scheduling/AvailabilityEditor';
 
 const Profile = ({ user }) => {
   const [isEditing, setIsEditing] = useState(false);
@@ -29,6 +30,19 @@ const Profile = ({ user }) => {
       gender: '',
       bloodGroup: ''
     },
+    medicalHistory: {
+      conditions: [],
+      medications: [],
+      allergies: [],
+      previousTreatments: [],
+      previousSurgeries: [],
+      primaryConcerns: [],
+      treatmentGoals: [],
+      patientReportedSymptoms: [],
+      previousPanchakarma: '',
+      lifestyle: { dietPreference: '', activityLevel: '', sleepPattern: '', waterIntake: '', notes: '' },
+      healthNotes: ''
+    },
     licenseNumber: '',
     verificationStatus: 'pending',
     // Practitioner-specific fields
@@ -44,16 +58,29 @@ const Profile = ({ user }) => {
       }
     },
     practiceAreas: [],
+    qualifications: [],
+    profileImageUrl: '',
+    availabilitySchedule: [],
     consultationFee: 0,
     availableForNewPatients: true,
     bio: '',
-    experience: 0
+    experience: 0,
+    employeeId: '',
+    joiningDate: ''
   });
 
   const [initialData, setInitialData] = useState(null);
   const [verificationStatus, setVerificationStatus] = useState(null);
   const [showVerificationModal, setShowVerificationModal] = useState(false);
   const [additionalDocuments, setAdditionalDocuments] = useState('');
+
+  const calculateAge = (value) => {
+    if (!value) return null;
+    const dob = new Date(value);
+    if (Number.isNaN(dob.getTime()) || dob > new Date()) return null;
+    const today = new Date();
+    return today.getFullYear() - dob.getFullYear() - (today < new Date(today.getFullYear(), dob.getMonth(), dob.getDate()) ? 1 : 0);
+  };
 
   const { show } = useToast();
 
@@ -67,7 +94,7 @@ const Profile = ({ user }) => {
 
   const fetchProfile = async () => {
     try {
-      const response = await authFetch('http://localhost:5000/api/profile', {
+      const response = await authFetch('/api/profile', {
         headers: {
           'Content-Type': 'application/json'
         }
@@ -98,6 +125,25 @@ const Profile = ({ user }) => {
             gender: data.personalDetails?.gender || '',
             bloodGroup: data.personalDetails?.bloodGroup || ''
           },
+          medicalHistory: {
+            conditions: data.medicalHistory?.conditions || [],
+            medications: data.medicalHistory?.medications || [],
+            allergies: data.medicalHistory?.allergies || [],
+            previousTreatments: data.medicalHistory?.previousTreatments || [],
+            previousSurgeries: data.medicalHistory?.previousSurgeries || [],
+            primaryConcerns: data.medicalHistory?.primaryConcerns || [],
+            treatmentGoals: data.medicalHistory?.treatmentGoals || [],
+            patientReportedSymptoms: data.medicalHistory?.patientReportedSymptoms || [],
+            previousPanchakarma: data.medicalHistory?.previousPanchakarma || '',
+            lifestyle: {
+              dietPreference: data.medicalHistory?.lifestyle?.dietPreference || '',
+              activityLevel: data.medicalHistory?.lifestyle?.activityLevel || '',
+              sleepPattern: data.medicalHistory?.lifestyle?.sleepPattern || '',
+              waterIntake: data.medicalHistory?.lifestyle?.waterIntake || '',
+              notes: data.medicalHistory?.lifestyle?.notes || '',
+            },
+            healthNotes: data.medicalHistory?.healthNotes || ''
+          },
           licenseNumber: data.licenseNumber || '',
           verificationStatus: data.verificationStatus || 'pending',
           // Practitioner-specific fields
@@ -113,10 +159,15 @@ const Profile = ({ user }) => {
             }
           },
           practiceAreas: data.practiceAreas || [],
+          qualifications: data.qualifications || [],
+          profileImageUrl: data.profileImageUrl || '',
+          availabilitySchedule: data.availabilitySchedule || [],
           consultationFee: data.consultationFee || 0,
           availableForNewPatients: data.availableForNewPatients !== undefined ? data.availableForNewPatients : true,
           bio: data.bio || '',
-          experience: data.experience || 0
+          experience: data.experience || 0,
+          employeeId: data.employeeId || '',
+          joiningDate: data.joiningDate || ''
         };
         
         setProfileData(mergedData);
@@ -181,20 +232,26 @@ const Profile = ({ user }) => {
           licenseNumber: profileData.licenseNumber,
           practiceLocation: profileData.practiceLocation,
           practiceAreas: profileData.practiceAreas,
+          qualifications: profileData.qualifications,
+          profileImageUrl: profileData.profileImageUrl,
+          availabilitySchedule: profileData.availabilitySchedule,
           consultationFee: profileData.consultationFee,
           availableForNewPatients: profileData.availableForNewPatients,
           experience: profileData.experience
         };
+      } else if (user?.userType === 'receptionist') {
+        payload = { ...commonFields, profileImageUrl: profileData.profileImageUrl };
       } else {
         // Patient (or other roles) can only update patient-relevant fields
         payload = {
           ...commonFields,
           caregiverPhone: profileData.caregiverPhone,
-          emergencyContact: profileData.emergencyContact
+        emergencyContact: profileData.emergencyContact,
+        medicalHistory: profileData.medicalHistory
         };
       }
 
-      const response = await authFetch('http://localhost:5000/api/profile', {
+      const response = await authFetch('/api/profile', {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json'
@@ -245,7 +302,7 @@ const Profile = ({ user }) => {
 
   const fetchVerificationStatus = async () => {
     try {
-      const response = await authFetch('http://localhost:5000/api/verification/status', {
+      const response = await authFetch('/api/verification/status', {
         headers: {
           'Content-Type': 'application/json'
         }
@@ -272,7 +329,7 @@ const Profile = ({ user }) => {
 
     setLoading(true);
     try {
-      const response = await authFetch('http://localhost:5000/api/verification/submit', {
+      const response = await authFetch('/api/verification/submit', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
@@ -385,6 +442,19 @@ const Profile = ({ user }) => {
     );
   }
 
+  const completionFields = [
+    profileData.name,
+    profileData.email,
+    profileData.phone,
+    profileData.personalDetails?.dateOfBirth,
+    profileData.address?.street,
+    profileData.address?.city,
+    profileData.address?.state,
+    profileData.emergencyContact?.name,
+    profileData.emergencyContact?.phone,
+  ];
+  const completionPercent = Math.round(completionFields.filter((value) => String(value || '').trim()).length / completionFields.length * 100);
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-ayurveda-chandana/20 via-ayurveda-haldi/10 to-ayurveda-kumkum/20 p-6">
       <div className="max-w-4xl mx-auto">
@@ -410,6 +480,16 @@ const Profile = ({ user }) => {
           </div>
         </div>
 
+        {user?.userType === 'patient' && <div className="bg-white/90 rounded-2xl shadow-sm p-5 mb-6 border border-ayurveda-kumkum/20">
+          <div className="mb-2 flex items-center justify-between text-sm font-semibold text-dosha-kapha">
+            <span>Patient profile completion</span><span>{completionPercent}%</span>
+          </div>
+          <div className="h-2 overflow-hidden rounded-full bg-amber-100" role="progressbar" aria-valuenow={completionPercent} aria-valuemin="0" aria-valuemax="100" aria-label="Patient profile completion">
+            <div className="h-full rounded-full bg-gradient-to-r from-ayurveda-kumkum to-ayurveda-brahmi" style={{ width: `${completionPercent}%` }} />
+          </div>
+          <p className="mt-2 text-xs text-gray-600">Based on contact, date of birth, address, and emergency contact details.</p>
+        </div>}
+
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Personal Information */}
           <div className="bg-white/90 backdrop-blur-lg rounded-2xl shadow-lg p-6 border border-ayurveda-kumkum/20">
@@ -428,6 +508,7 @@ const Profile = ({ user }) => {
                   disabled={!isEditing}
                   className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:ring-4 focus:ring-ayurveda-kumkum/20 focus:border-ayurveda-kumkum disabled:bg-gray-100"
                 />
+                {calculateAge(profileData.personalDetails?.dateOfBirth) != null && <p className="mt-1 text-xs text-gray-600">Age: {calculateAge(profileData.personalDetails.dateOfBirth)} years (calculated from date of birth)</p>}
               </div>
 
               <div>
@@ -451,6 +532,11 @@ const Profile = ({ user }) => {
                   className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl focus:ring-4 focus:ring-ayurveda-kumkum/20 focus:border-ayurveda-kumkum disabled:bg-gray-100"
                 />
               </div>
+
+              {user?.userType === 'receptionist' && <>
+                <div><label className="block text-sm font-semibold text-gray-700 mb-2">Profile image URL (HTTPS)</label><input type="url" value={profileData.profileImageUrl || ''} onChange={(event) => handleInputChange('profileImageUrl', event.target.value)} disabled={!isEditing} placeholder="https://…" className="w-full rounded-xl border-2 border-gray-200 px-4 py-3 disabled:bg-gray-100"/>{profileData.profileImageUrl && <img src={profileData.profileImageUrl} alt="Receptionist profile" className="mt-3 h-16 w-16 rounded-full border object-cover"/>}</div>
+                <div className="grid grid-cols-2 gap-3"><div><label className="block text-sm font-semibold text-gray-700 mb-2">Employee ID</label><input value={profileData.employeeId || ''} disabled className="w-full rounded-xl border-2 border-gray-200 bg-gray-100 px-4 py-3 text-gray-600"/></div><div><label className="block text-sm font-semibold text-gray-700 mb-2">Joining date</label><input value={profileData.joiningDate ? new Date(profileData.joiningDate).toLocaleDateString() : ''} disabled className="w-full rounded-xl border-2 border-gray-200 bg-gray-100 px-4 py-3 text-gray-600"/></div></div>
+              </>}
 
               {/* Show caregiver phone only for patients */}
               {user?.userType === 'patient' && (
@@ -560,6 +646,17 @@ const Profile = ({ user }) => {
               </h2>
               
               <div className="space-y-4">
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">Profile image URL (HTTPS)</label>
+                    <input type="url" value={profileData.profileImageUrl || ''} onChange={(e) => handleInputChange('profileImageUrl', e.target.value)} disabled={!isEditing} placeholder="https://…" className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl disabled:bg-gray-100" />
+                  </div>
+                  <div>
+                    <label className="block text-sm font-semibold text-gray-700 mb-2">Qualifications</label>
+                    <input value={(profileData.qualifications || []).join(', ')} onChange={(e) => handleInputChange('qualifications', e.target.value.split(',').map((item) => item.trim()).filter(Boolean))} disabled={!isEditing} placeholder="Comma separated" className="w-full px-4 py-3 border-2 border-gray-200 rounded-xl disabled:bg-gray-100" />
+                  </div>
+                </div>
+                {profileData.profileImageUrl && <img src={profileData.profileImageUrl} alt="Practitioner profile" className="h-20 w-20 rounded-full border object-cover" />}
                 <div>
                   <label className="block text-sm font-semibold text-gray-700 mb-2">Practice Address</label>
                   <input
@@ -668,36 +765,9 @@ const Profile = ({ user }) => {
                 </div>
 
                 <div>
-                  <label className="block text-sm font-semibold text-gray-700 mb-2">Practice Areas</label>
-                  <div className="grid grid-cols-2 gap-2">
-                    {[
-                      'Vamana (Therapeutic Vomiting)',
-                      'Virechana (Purgation Therapy)',
-                      'Basti (Medicated Enema)',
-                      'Nasya (Nasal Administration)',
-                      'Raktamoksha (Bloodletting)',
-                      'General Consultation',
-                      'Wellness Counseling'
-                    ].map((area) => (
-                      <label key={area} className="flex items-center">
-                        <input
-                          type="checkbox"
-                          checked={profileData.practiceAreas?.includes(area) || false}
-                          onChange={(e) => {
-                            const currentAreas = profileData.practiceAreas || [];
-                            if (e.target.checked) {
-                              handleInputChange('practiceAreas', [...currentAreas, area]);
-                            } else {
-                              handleInputChange('practiceAreas', currentAreas.filter(a => a !== area));
-                            }
-                          }}
-                          disabled={!isEditing}
-                          className="mr-2"
-                        />
-                        <span className="text-sm text-gray-700">{area}</span>
-                      </label>
-                    ))}
-                  </div>
+                  <label className="block text-sm font-semibold text-gray-700 mb-2">Specializations and therapy skills</label>
+                  <textarea value={(profileData.practiceAreas || []).join(', ')} onChange={(event) => handleInputChange('practiceAreas', event.target.value.split(',').map((item) => item.trim()).filter(Boolean))} disabled={!isEditing} maxLength={1000} rows={3} placeholder="Enter your verified specializations and therapy skills, separated by commas" className="w-full rounded-xl border-2 border-gray-200 p-3 focus:border-ayurveda-kumkum disabled:bg-gray-100" />
+                  <p className="mt-1 text-xs text-gray-500">Use the same skill names configured in the therapy catalogue when applicable.</p>
                 </div>
 
                 <div className="flex items-center">
@@ -712,6 +782,10 @@ const Profile = ({ user }) => {
                   <label htmlFor="availableForNewPatients" className="text-sm font-semibold text-gray-700">
                     Available for new patients
                   </label>
+                </div>
+                <div>
+                  <h3 className="mb-2 text-sm font-semibold text-gray-700">Weekly availability</h3>
+                  <AvailabilityEditor value={profileData.availabilitySchedule || []} onChange={(value) => handleInputChange('availabilitySchedule', value)} disabled={!isEditing} />
                 </div>
               </div>
             </div>
@@ -867,6 +941,37 @@ const Profile = ({ user }) => {
             </div>
           </div>
         </div>
+
+        {user?.userType === 'patient' && <div className="mt-6 bg-white/90 backdrop-blur-lg rounded-2xl shadow-lg p-6 border border-ayurveda-kumkum/20">
+          <h2 className="text-xl font-display text-dosha-kapha mb-2 flex items-center"><Heart className="w-6 h-6 mr-2" />Medical History</h2>
+          <p className="mb-5 text-sm text-gray-600">Share only health information relevant to your care. Your practitioner can view this with your patient record.</p>
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            {[
+              ['conditions', 'Existing conditions'],
+              ['allergies', 'Allergies'],
+              ['medications', 'Current medications'],
+              ['previousTreatments', 'Previous therapies or treatments'],
+              ['previousSurgeries', 'Previous surgeries'],
+              ['primaryConcerns', 'Primary health concerns'],
+              ['treatmentGoals', 'Treatment goals'],
+              ['patientReportedSymptoms', 'Symptoms you would like to report'],
+            ].map(([key, label]) => <label key={key} className="block text-sm font-semibold text-gray-700">
+              {label}
+              <textarea value={(profileData.medicalHistory?.[key] || []).join(', ')} onChange={(event) => handleInputChange(`medicalHistory.${key}`, event.target.value.split(',').map((item) => item.trim()).filter(Boolean))} disabled={!isEditing} rows="3" className="mt-2 w-full rounded-xl border-2 border-gray-200 p-3 font-normal focus:border-ayurveda-kumkum focus:ring-4 focus:ring-ayurveda-kumkum/20 disabled:bg-gray-100" placeholder="Separate entries with commas" />
+            </label>)}
+            <label className="block text-sm font-semibold text-gray-700">Previous Panchakarma experience
+              <textarea value={profileData.medicalHistory?.previousPanchakarma || ''} onChange={(event) => handleInputChange('medicalHistory.previousPanchakarma', event.target.value)} disabled={!isEditing} rows="2" maxLength="1000" className="mt-2 w-full rounded-xl border-2 border-gray-200 p-3 font-normal disabled:bg-gray-100" placeholder="Optional" />
+            </label>
+            {[
+              ['dietPreference', 'Diet preference'], ['activityLevel', 'Daily activity level'], ['sleepPattern', 'Sleep pattern'], ['waterIntake', 'Water intake (if you track it)'], ['notes', 'Lifestyle notes'],
+            ].map(([key, label]) => <label key={key} className="block text-sm font-semibold text-gray-700">
+              {label}<input value={profileData.medicalHistory?.lifestyle?.[key] || ''} onChange={(event) => setProfileData((current) => ({ ...current, medicalHistory: { ...current.medicalHistory, lifestyle: { ...current.medicalHistory?.lifestyle, [key]: event.target.value } } }))} disabled={!isEditing} maxLength={key === 'notes' ? 2000 : key === 'sleepPattern' ? 300 : 100} className="mt-2 w-full rounded-xl border-2 border-gray-200 p-3 font-normal disabled:bg-gray-100" />
+            </label>)}
+            <label className="block text-sm font-semibold text-gray-700 md:col-span-2">Relevant health notes
+              <textarea value={profileData.medicalHistory?.healthNotes || ''} onChange={(event) => handleInputChange('medicalHistory.healthNotes', event.target.value)} disabled={!isEditing} rows="4" maxLength="5000" className="mt-2 w-full rounded-xl border-2 border-gray-200 p-3 font-normal focus:border-ayurveda-kumkum focus:ring-4 focus:ring-ayurveda-kumkum/20 disabled:bg-gray-100" placeholder="Notes you want your care team to know" />
+            </label>
+          </div>
+        </div>}
 
 
         {/* Save Button */}

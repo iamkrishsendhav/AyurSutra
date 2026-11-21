@@ -4,11 +4,12 @@ const twilio = require('twilio');
 const Notification = require('../models/Notification');
 const User = require('../models/User');
 const { normalizePhone } = require('../utils/phone');
+const auth = require('../middleware/auth');
 
 // Support both naming conventions: TWILIO_SID/TWILIO_TOKEN or TWILIO_ACCOUNT_SID/TWILIO_AUTH_TOKEN
 const TWILIO_SID = process.env.TWILIO_SID || process.env.TWILIO_ACCOUNT_SID;
 const TWILIO_TOKEN = process.env.TWILIO_TOKEN || process.env.TWILIO_AUTH_TOKEN;
-const TWILIO_WHATSAPP_FROM_RAW = process.env.TWILIO_WHATSAPP_FROM;
+const TWILIO_WHATSAPP_FROM_RAW = process.env.TWILIO_WHATSAPP_FROM || process.env.TWILIO_WHATSAPP_NUMBER || process.env.TWILIO_PHONE_NUMBER;
 
 let twilioClient = null;
 if (TWILIO_SID && TWILIO_TOKEN) twilioClient = twilio(TWILIO_SID, TWILIO_TOKEN);
@@ -20,10 +21,10 @@ function formatWhatsappFrom(raw){
 
 // POST /admin/send-test-whatsapp
 // Body: { email: 'patient@example.com', message: 'text' }
-router.post('/send-test-whatsapp', async (req, res) => {
+router.post('/send-test-whatsapp', auth, (req, res, next) => req.user.userType === 'admin' ? next() : res.status(403).json({ msg: 'Admin access required' }), async (req, res) => {
   try {
     const { email, message } = req.body;
-    if (!email) return res.status(400).json({ msg: 'email required' });
+    if (!email || typeof email !== 'string' || email.length > 254 || (message !== undefined && (typeof message !== 'string' || message.length > 1000))) return res.status(400).json({ msg: 'Valid email and message are required' });
     const user = await User.findOne({ email });
     if (!user) return res.status(404).json({ msg: 'user not found' });
 
@@ -33,18 +34,7 @@ router.post('/send-test-whatsapp', async (req, res) => {
     // If Twilio isn't configured, return a diagnostic payload to help debug env and target normalization
     if (!twilioClient || !TWILIO_WHATSAPP_FROM_RAW) {
       console.warn('Admin send-test-whatsapp attempted without Twilio configured', { twilioConfigured: !!twilioClient, whatsappFromConfigured: !!TWILIO_WHATSAPP_FROM_RAW });
-      return res.status(500).json({
-        msg: 'Twilio not configured',
-        diagnostic: {
-          twilioSid_present: !!TWILIO_SID,
-          twilioToken_present: !!TWILIO_TOKEN,
-          twilioWhatsappFrom_present: !!TWILIO_WHATSAPP_FROM_RAW,
-          user_phone_raw: user.phone,
-          user_phone_normalized: normalized,
-          computed_to: to,
-          note: 'Ensure TWILIO_SID, TWILIO_TOKEN, and TWILIO_WHATSAPP_FROM are set in the server process. If using local dev, run start-with-twilio.ps1 or set env vars and restart the server.'
-        }
-      });
+      return res.status(503).json({ msg: 'WhatsApp delivery is not configured' });
     }
 
     const from = formatWhatsappFrom(TWILIO_WHATSAPP_FROM_RAW);
@@ -80,7 +70,7 @@ router.post('/send-test-whatsapp', async (req, res) => {
 });
 
 // GET /admin/recent-notifications?limit=20
-router.get('/recent-notifications', async (req, res) => {
+router.get('/recent-notifications', auth, (req, res, next) => req.user.userType === 'admin' ? next() : res.status(403).json({ msg: 'Admin access required' }), async (req, res) => {
   try {
     const limit = parseInt(req.query.limit || '20', 10);
     const docs = await Notification.find().sort({ createdAt: -1 }).limit(limit).populate('user', 'email name phone');
@@ -96,6 +86,9 @@ router.get('/recent-notifications', async (req, res) => {
 // containing at least `MessageSid` and `MessageStatus` and updates matching Notification by twilioSid.
 router.post('/twilio-status', express.urlencoded({ extended: true }), async (req, res) => {
   try {
+    const signature = req.get('X-Twilio-Signature');
+    const callbackUrl = process.env.TWILIO_STATUS_CALLBACK_URL || `${req.protocol}://${req.get('host')}${req.originalUrl}`;
+    if (!TWILIO_TOKEN || !signature || !twilio.validateRequest(TWILIO_TOKEN, signature, callbackUrl, req.body || {})) return res.status(403).send('Forbidden');
     const body = req.body || {};
     const sid = body.MessageSid || body.SmsSid || body.Sid || body.MessageSid;
     const status = body.MessageStatus || body.SmsStatus || body.Status || '';

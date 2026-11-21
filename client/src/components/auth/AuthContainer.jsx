@@ -5,6 +5,7 @@ import GoogleAuthSuccess from "./GoogleAuthSuccess";
 
 const AuthContainer = ({ onAuthSuccess, onBackToLanding }) => {
   const [isLogin, setIsLogin] = useState(true);
+  const [expectedRole, setExpectedRole] = useState('patient');
   const [showGoogleAuth, setShowGoogleAuth] = useState(false);
   // store prefill credentials after signup so LoginPage can use them
   const [prefill, setPrefill] = useState({ email: "", password: "" });
@@ -44,14 +45,16 @@ const AuthContainer = ({ onAuthSuccess, onBackToLanding }) => {
   };
 
   return (
-    <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-green-50 via-blue-50 to-purple-50">
+    <>
       {showGoogleAuth ? (
         <GoogleAuthSuccess onAuthSuccess={handleAuthSuccess} />
       ) : isLogin ? (
         <LoginPage
-          onSwitchToSignup={() => setIsLogin(false)}
+          onSwitchToSignup={() => { setExpectedRole('patient'); setIsLogin(false); }}
           onAuthSuccess={handleAuthSuccess}
           onBackToLanding={onBackToLanding}
+          expectedRole={expectedRole}
+          onRoleChange={setExpectedRole}
           prefillEmail={prefill.email}
           prefillPassword={prefill.password}
         />
@@ -62,7 +65,7 @@ const AuthContainer = ({ onAuthSuccess, onBackToLanding }) => {
           onBackToLanding={onBackToLanding}
         />
       )}
-    </div>
+    </>
   );
 };
 

@@ -47,8 +47,10 @@ router.post("/", async (req, res) => {
         }
 
         // Format numbers specifically for WhatsApp
-        const fromNumber = `whatsapp:${process.env.TWILIO_PHONE_NUMBER}`;
-        const toNumber = `whatsapp:${normalizePhone(process.env.PRACTITIONER_PHONE) || process.env.PRACTITIONER_PHONE}`;
+        const fromRaw = process.env.TWILIO_PHONE_NUMBER || process.env.TWILIO_WHATSAPP_NUMBER || process.env.TWILIO_WHATSAPP_FROM || '';
+        const fromNumber = fromRaw.startsWith('whatsapp:') ? fromRaw : `whatsapp:${fromRaw}`;
+        const toRaw = normalizePhone(process.env.PRACTITIONER_PHONE) || process.env.PRACTITIONER_PHONE || '';
+        const toNumber = String(toRaw).startsWith('whatsapp:') ? toRaw : `whatsapp:${toRaw}`;
         
         const opts = {
           body: `🚨 Alert: Patient ${user.name} (${user.email}) reported severe issue: "${message}".`,

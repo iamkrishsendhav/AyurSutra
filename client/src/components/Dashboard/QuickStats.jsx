@@ -1,35 +1,36 @@
 import React from "react";
 import { Calendar, CheckCircle, Bell, TrendingUp } from "lucide-react";
 
-const QuickStats = ({ patientProgress, notifications }) => {
+const QuickStats = ({ data }) => {
+  const nextSession = data?.nextSession ? new Date(data.nextSession.split(" ")[0]).toLocaleString() : "Not scheduled";
   const stats = [
     {
       icon: Calendar,
       iconColor: "text-blue-600",
       bgColor: "bg-blue-100",
       label: "Next Session",
-      value: "Sep 8, 10:00 AM",
+      value: nextSession,
     },
     {
       icon: CheckCircle,
       iconColor: "text-green-600",
       bgColor: "bg-green-100",
       label: "Completed",
-      value: `${patientProgress.completedSessions}/${patientProgress.totalSessions}`,
+      value: `${data?.completed ?? 0}/${data?.total ?? 0}`,
     },
     {
       icon: Bell,
       iconColor: "text-orange-600",
       bgColor: "bg-orange-100",
       label: "Notifications",
-      value: notifications.length,
+      value: data?.notifications ?? 0,
     },
     {
       icon: TrendingUp,
       iconColor: "text-purple-600",
       bgColor: "bg-purple-100",
       label: "Wellness Score",
-      value: "8.2/10",
+      value: Number.isFinite(data?.wellnessScore) ? `${data.wellnessScore}/10` : "Not assessed",
     },
   ];
 

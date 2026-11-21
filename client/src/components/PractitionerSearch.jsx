@@ -6,6 +6,7 @@ import authFetch from '../utils/apiClient.js';
 
 const PractitionerSearch = ({ user, onAssignmentSuccess }) => {
   const [searchParams, setSearchParams] = useState({
+    q: '',
     city: '',
     state: '',
     pincode: '',
@@ -16,18 +17,19 @@ const PractitionerSearch = ({ user, onAssignmentSuccess }) => {
   const [selectedPractitioner, setSelectedPractitioner] = useState(null);
   const [assignedPractitioner, setAssignedPractitioner] = useState(null);
   const [showAssignmentModal, setShowAssignmentModal] = useState(false);
+  const [viewingPractitioner, setViewingPractitioner] = useState(null);
+  const [searchError, setSearchError] = useState('');
   const { show } = useToast();
 
-  // Available practice areas
-  const practiceAreas = [
-    'Vamana (Therapeutic Vomiting)',
-    'Virechana (Purgation Therapy)',
-    'Basti (Medicated Enema)',
-    'Nasya (Nasal Administration)',
-    'Raktamoksha (Bloodletting)',
-    'General Consultation',
-    'Wellness Counseling'
-  ];
+  const viewProfile = async (practitionerId) => {
+    setSearchError('');
+    try {
+      const response = await authFetch(`/api/practitioner-search/${practitionerId}`);
+      const body = await response.json();
+      if (!response.ok) throw new Error(body.message || 'Unable to load Vaidya profile');
+      setViewingPractitioner(body.practitioner);
+    } catch (error) { setSearchError(error.message); }
+  };
 
   useEffect(() => {
     if (user?.userType === 'patient') {
@@ -37,7 +39,7 @@ const PractitionerSearch = ({ user, onAssignmentSuccess }) => {
 
   const fetchAssignedPractitioner = async () => {
     try {
-      const response = await authFetch('http://localhost:5000/api/practitioner-search/assigned/current');
+      const response = await authFetch('/api/practitioner-search/assigned/current');
       const data = await response.json();
       if (data.success && data.assigned) {
         setAssignedPractitioner(data.practitioner);
@@ -48,16 +50,8 @@ const PractitionerSearch = ({ user, onAssignmentSuccess }) => {
   };
 
   const handleSearch = async () => {
-    if (!searchParams.city && !searchParams.state && !searchParams.pincode) {
-      show({
-        title: 'Search Required',
-        message: 'Please enter at least a city, state, or pincode to search',
-        duration: 4000
-      });
-      return;
-    }
-
     setLoading(true);
+    setSearchError('');
     try {
       const queryParams = new URLSearchParams();
       Object.entries(searchParams).forEach(([key, value]) => {
@@ -67,7 +61,7 @@ const PractitionerSearch = ({ user, onAssignmentSuccess }) => {
       if (user?.userType === 'practitioner') {
         queryParams.append('includeUnverified', 'true');
       }
-      const response = await authFetch(`http://localhost:5000/api/practitioner-search/search?${queryParams}`);
+      const response = await authFetch(`/api/practitioner-search/search?${queryParams}`);
       const data = await response.json();
       if (data.success) {
         setPractitioners(data.practitioners);
@@ -86,6 +80,7 @@ const PractitionerSearch = ({ user, onAssignmentSuccess }) => {
         });
       }
     } catch (error) {
+      setSearchError('Failed to search practitioners');
       console.error('Search error:', error);
       show({
         title: 'Search Error',
@@ -104,7 +99,7 @@ const PractitionerSearch = ({ user, onAssignmentSuccess }) => {
 
   const confirmAssignment = async () => {
     try {
-      const response = await authFetch('http://localhost:5000/api/practitioner-search/assign', {
+      const response = await authFetch('/api/practitioner-search/assign', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'
@@ -145,7 +140,7 @@ const PractitionerSearch = ({ user, onAssignmentSuccess }) => {
 
   const handleRemoveAssignment = async () => {
     try {
-      const response = await authFetch('http://localhost:5000/api/practitioner-search/assigned', {
+      const response = await authFetch('/api/practitioner-search/assigned', {
         method: 'DELETE'
       });
       const data = await response.json();
@@ -217,7 +212,12 @@ const PractitionerSearch = ({ user, onAssignmentSuccess }) => {
           )}
 
           {/* Search Form */}
-          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
+          {searchError && <p role="alert" className="mb-4 rounded-lg bg-red-50 p-3 text-sm text-red-800">{searchError}</p>}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-4 mb-6">
+            <div>
+              <label className="block text-sm font-medium text-gray-700 mb-2">Name or qualification</label>
+              <input type="search" value={searchParams.q} onChange={(e) => setSearchParams({...searchParams, q: e.target.value})} placeholder="Search Vaidya" className="w-full px-3 py-2 border border-gray-300 rounded-lg" />
+            </div>
             <div>
               <label className="block text-sm font-medium text-gray-700 mb-2">City</label>
               <input
@@ -249,17 +249,14 @@ const PractitionerSearch = ({ user, onAssignmentSuccess }) => {
               />
             </div>
             <div>
-              <label className="block text-sm font-medium text-gray-700 mb-2">Practice Area</label>
-              <select
+              <label className="block text-sm font-medium text-gray-700 mb-2">Specialization</label>
+              <input
+                type="search"
                 value={searchParams.practiceArea}
                 onChange={(e) => setSearchParams({...searchParams, practiceArea: e.target.value})}
+                placeholder="Search specialization"
                 className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-              >
-                <option value="">All Areas</option>
-                {practiceAreas.map((area) => (
-                  <option key={area} value={area}>{area}</option>
-                ))}
-              </select>
+              />
             </div>
           </div>
           
@@ -302,6 +299,7 @@ const PractitionerSearch = ({ user, onAssignmentSuccess }) => {
                   {practitioner.bio && (
                     <p className="text-gray-600 text-sm mb-4 line-clamp-2">{practitioner.bio}</p>
                   )}
+                  {practitioner.qualifications?.length > 0 && <p className="mb-3 text-sm text-gray-600">{practitioner.qualifications.join(' · ')}</p>}
                   
                   <div className="space-y-2 mb-4">
                     {practitioner.practiceAreas && practitioner.practiceAreas.length > 0 && (
@@ -337,6 +335,12 @@ const PractitionerSearch = ({ user, onAssignmentSuccess }) => {
                   </div>
                   
                   <button
+                    onClick={() => viewProfile(practitioner._id)}
+                    className="mb-2 w-full px-4 py-2 border border-ayurveda-kumkum text-ayurveda-kumkum rounded-lg hover:bg-ayurveda-kumkum/5 transition-colors"
+                  >
+                    View full profile
+                  </button>
+                  <button
                     onClick={() => handleAssignPractitioner(practitioner)}
                     className="w-full px-4 py-2 bg-ayurveda-kumkum text-white rounded-lg hover:bg-ayurveda-brahmi transition-colors"
                   >
@@ -347,6 +351,8 @@ const PractitionerSearch = ({ user, onAssignmentSuccess }) => {
             </div>
           </div>
         )}
+
+        {viewingPractitioner && <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={() => setViewingPractitioner(null)}><section role="dialog" aria-modal="true" className="max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-2xl bg-white p-6" onClick={(event) => event.stopPropagation()}><div className="flex items-start justify-between gap-3"><h2 className="text-xl font-semibold">Vaidya {viewingPractitioner.name}</h2><button onClick={() => setViewingPractitioner(null)} className="rounded border px-3 py-1">Close</button></div><p className="mt-2 text-sm">{viewingPractitioner.qualifications?.join(' · ') || 'Qualifications not listed'}</p><p className="mt-1 text-sm">{viewingPractitioner.practiceAreas?.join(' · ') || 'Specialization not listed'}</p><p className="mt-3 text-sm text-gray-700">{viewingPractitioner.bio || 'No professional description provided.'}</p><p className="mt-3 text-sm">{viewingPractitioner.experience || 0} years experience · {viewingPractitioner.consultationFee > 0 ? `Consultation fee ₹${viewingPractitioner.consultationFee}` : 'Fee not listed'}</p><p className="mt-2 text-sm">Clinic: {[viewingPractitioner.practiceLocation?.address, viewingPractitioner.practiceLocation?.city, viewingPractitioner.practiceLocation?.state, viewingPractitioner.practiceLocation?.pincode].filter(Boolean).join(', ') || 'Location not provided'}</p><div className="mt-3 text-sm"><b>Availability</b>{viewingPractitioner.availabilitySchedule?.filter((item) => item.isAvailable).length ? viewingPractitioner.availabilitySchedule.filter((item) => item.isAvailable).map((item) => <p key={item.dayOfWeek}>{item.dayOfWeek} · {item.startTime}–{item.endTime}</p>) : <p>Availability is not listed.</p>}</div></section></div>}
 
         {/* Assignment Confirmation Modal */}
         {showAssignmentModal && selectedPractitioner && (

@@ -21,7 +21,7 @@ const VerificationPanel = ({ user }) => {
 
   const fetchVerificationRequests = async () => {
     try {
-      const response = await authFetch('http://localhost:5000/api/verification/requests', {
+      const response = await authFetch('/api/verification/requests', {
         headers: {
           'Content-Type': 'application/json'
         }
@@ -37,7 +37,7 @@ const VerificationPanel = ({ user }) => {
 
   const fetchPractitioners = async () => {
     try {
-      const response = await authFetch('http://localhost:5000/api/verification/practitioners', {
+      const response = await authFetch('/api/verification/practitioners', {
         headers: {
           'Content-Type': 'application/json'
         }
@@ -54,7 +54,7 @@ const VerificationPanel = ({ user }) => {
   const handleReview = async (practitionerId, action) => {
     setLoading(true);
     try {
-      const response = await authFetch(`http://localhost:5000/api/verification/review/${practitionerId}`, {
+      const response = await authFetch(`/api/verification/review/${practitionerId}`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'

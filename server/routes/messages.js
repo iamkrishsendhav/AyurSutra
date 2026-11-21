@@ -1,89 +1,84 @@
 const express = require('express');
-const router = express.Router();
+const mongoose = require('mongoose');
+const auth = require('../middleware/auth');
 const Message = require('../models/Message');
 const User = require('../models/User');
+const { notifyUsers } = require('../utils/notifications');
 
-// Send a message
-router.post('/', async (req, res) => {
-  try {
-    const { fromEmail, toEmail, fromId, toId, text } = req.body;
-    if (!text) return res.status(400).json({ msg: 'Missing text' });
+const router = express.Router();
+router.use(auth);
 
-    let from, to;
-    if (fromId) {
-      from = await User.findById(fromId);
-    } else if (fromEmail) {
-      from = await User.findOne({ email: fromEmail });
-    }
-
-    if (toId) {
-      to = await User.findById(toId);
-    } else if (toEmail) {
-      to = await User.findOne({ email: toEmail });
-    }
-
-    if (!from || !to) return res.status(404).json({ msg: 'User(s) not found' });
-
-    const message = new Message({ from: from._id, to: to._id, text });
-    await message.save();
-    res.json(message);
-  } catch (err) {
-    console.error('Error sending message', err);
-    res.status(500).json({ msg: err.message });
+async function allowedContact(user, otherId) {
+  if (user.userType === 'admin' || !mongoose.isValidObjectId(otherId) || String(user._id) === String(otherId)) return null;
+  const currentUser = await User.findById(user._id).select('userType assignedPractitioner professionalStatus accountStatus').lean();
+  if (!currentUser || currentUser.accountStatus === 'suspended' || (currentUser.userType === 'practitioner' && currentUser.professionalStatus === 'inactive')) return null;
+  if (user.userType === 'patient') {
+    if (!currentUser.assignedPractitioner || String(currentUser.assignedPractitioner) !== String(otherId)) return null;
+    return User.findOne({ _id: otherId, userType: 'practitioner', professionalStatus: { $ne: 'inactive' } }).select('_id name email userType profileImageUrl');
   }
+  if (user.userType === 'practitioner') {
+    return User.findOne({ _id: otherId, userType: 'patient', accountStatus: { $ne: 'suspended' }, assignedPractitioner: user._id }).select('_id name email userType profileImageUrl');
+  }
+  return null;
+}
+
+router.get('/contacts', async (req, res) => {
+  try {
+    let contacts = [];
+    if (req.user.userType === 'patient') {
+      const current = await User.findById(req.user._id).select('assignedPractitioner').lean();
+      const contact = current?.assignedPractitioner && await allowedContact(req.user, current.assignedPractitioner);
+      if (contact) contacts = [contact];
+    } else if (req.user.userType === 'practitioner') {
+      contacts = await User.find({ userType: 'patient', accountStatus: { $ne: 'suspended' }, assignedPractitioner: req.user._id }).select('_id name email userType profileImageUrl').sort({ name: 1 }).limit(500);
+    }
+    res.json({ contacts });
+  } catch (error) { res.status(500).json({ message: 'Unable to load communication contacts' }); }
 });
 
-// Get conversation between two users
-// Supports query by email (userA, userB) or by id (userAId, userBId)
+router.get('/inbox', async (req, res) => {
+  try {
+    const filter = { to: req.user._id };
+    if (['1', 'true'].includes(String(req.query.unreadOnly))) filter.read = false;
+    const messages = await Message.find(filter).sort({ createdAt: -1 }).limit(100).populate('from', 'name email userType profileImageUrl').lean();
+    res.json({ messages, unreadCount: await Message.countDocuments({ to: req.user._id, read: false }) });
+  } catch (error) { res.status(500).json({ message: 'Unable to load inbox' }); }
+});
+
 router.get('/conversation', async (req, res) => {
   try {
-    const { userA, userB, userAId, userBId } = req.query;
-
-    let a, b;
-    if (userAId && userBId) {
-      a = await User.findById(userAId);
-      b = await User.findById(userBId);
-    } else if (userA && userB) {
-      a = await User.findOne({ email: userA });
-      b = await User.findOne({ email: userB });
-    } else {
-      return res.status(400).json({ msg: 'Missing query params (userA/userB or userAId/userBId)' });
-    }
-
-    if (!a || !b) return res.status(404).json({ msg: 'User(s) not found' });
-
-    const messages = await Message.find({
-      $or: [
-        { from: a._id, to: b._id },
-        { from: b._id, to: a._id }
-      ]
-    }).sort({ createdAt: 1 }).populate('from to', 'name email phone');
-
+    const otherId = req.query.otherUserId || req.query.userBId;
+    if (req.query.userAId && String(req.query.userAId) !== String(req.user._id)) return res.status(403).json({ message: 'Conversation access denied' });
+    const contact = await allowedContact(req.user, otherId);
+    if (!contact) return res.status(404).json({ message: 'Conversation not found' });
+    const filter = { $or: [{ from: req.user._id, to: contact._id }, { from: contact._id, to: req.user._id }] };
+    await Message.updateMany({ from: contact._id, to: req.user._id, read: false }, { $set: { read: true } });
+    const messages = await Message.find(filter).sort({ createdAt: 1 }).limit(500).populate('from to', 'name email userType profileImageUrl').lean();
     res.json(messages);
-  } catch (err) {
-    console.error('Error fetching conversation', err);
-    res.status(500).json({ msg: err.message });
-  }
+  } catch (error) { res.status(500).json({ message: 'Unable to load conversation' }); }
+});
+
+router.post('/', async (req, res) => {
+  try {
+    const otherId = req.body.toId;
+    const text = typeof req.body.text === 'string' ? req.body.text.trim() : '';
+    if (!text || text.length > 5000) return res.status(400).json({ message: 'Message must contain 1 to 5000 characters' });
+    const contact = await allowedContact(req.user, otherId);
+    if (!contact) return res.status(403).json({ message: 'You cannot message this account' });
+    const message = await Message.create({ from: req.user._id, to: contact._id, text });
+    await notifyUsers([contact._id], 'message-received', `Message from ${req.user.name || 'your care team'}`, 'You have a new secure message.', { dedupeKey: `message:${message._id}` });
+    const result = await Message.findById(message._id).populate('from to', 'name email userType profileImageUrl');
+    res.status(201).json(result);
+  } catch (error) { res.status(500).json({ message: 'Unable to send message' }); }
+});
+
+router.patch('/:id/read', async (req, res) => {
+  try {
+    if (!mongoose.isValidObjectId(req.params.id)) return res.status(404).json({ message: 'Message not found' });
+    const message = await Message.findOneAndUpdate({ _id: req.params.id, to: req.user._id }, { $set: { read: true } }, { new: true });
+    if (!message) return res.status(404).json({ message: 'Message not found' });
+    res.json({ message });
+  } catch (error) { res.status(500).json({ message: 'Unable to update message' }); }
 });
 
 module.exports = router;
-
-// Inbox route: messages addressed to a user (optionally unread only)
-router.get('/inbox', async (req, res) => {
-  try {
-    const { userId, email, unreadOnly } = req.query;
-    let user;
-    if (userId) user = await User.findById(userId);
-    else if (email) user = await User.findOne({ email });
-    if (!user) return res.status(404).json({ msg: 'User not found' });
-
-    const q = { to: user._id };
-    if (unreadOnly === '1' || unreadOnly === 'true') q.read = false;
-
-    const messages = await Message.find(q).sort({ createdAt: -1 }).populate('from to', 'name email');
-    res.json(messages);
-  } catch (err) {
-    console.error('Error fetching inbox', err);
-    res.status(500).json({ msg: err.message });
-  }
-});

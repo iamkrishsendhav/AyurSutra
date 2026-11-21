@@ -1,56 +1,47 @@
+const path = require('node:path');
+require('dotenv').config({ path: path.resolve(__dirname, '../.env'), quiet: true });
 const connectDB = require('../config/db');
 const User = require('../models/User');
 const bcrypt = require('bcryptjs');
-
-const adminUser = {
-  name: "System Admin",
-  email: "admin@ayursutra.com",
-  password: "admin@123",
-  userType: "admin"
-};
+const { isValidUserPassword } = require('../utils/passwordPolicy');
 
 async function createAdminUser() {
+  const email = process.env.ADMIN_EMAIL?.trim().toLowerCase();
+  const password = process.env.ADMIN_INITIAL_PASSWORD;
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error('Set a valid ADMIN_EMAIL in the server environment');
+  if (!isValidUserPassword(password)) throw new Error('Set ADMIN_INITIAL_PASSWORD to a value between 6 and 128 characters');
+
   try {
     await connectDB();
-    
-    // Check if admin exists
-    const exists = await User.findOne({ email: adminUser.email });
-    if (exists) {
-      console.log('\n✅ Admin user already exists:');
-      console.log('Email:', exists.email);
-      console.log('Name:', exists.name);
-      console.log('\nLogin credentials:');
-      console.log('Email:', adminUser.email);
-      console.log('Password:', adminUser.password);
-      process.exit(0);
+    let admin = await User.findOne({ email });
+    const promoteExistingPatient = process.argv.includes('--promote-existing-patient');
+    if (admin && admin.userType !== 'admin' && !(admin.userType === 'patient' && promoteExistingPatient)) {
+      throw new Error('ADMIN_EMAIL belongs to a non-admin account; no changes were made');
+    }
+    if (!admin) {
+      const existingAdmins = await User.find({ userType: 'admin' }).select('_id').limit(2).lean();
+      if (existingAdmins.length > 1) throw new Error('Multiple admin accounts exist; specify the intended account before changing admin credentials');
+      if (existingAdmins.length === 1) admin = await User.findById(existingAdmins[0]._id);
     }
 
-    // Create new admin
-    const salt = await bcrypt.genSalt(10);
-    const hashedPassword = await bcrypt.hash(adminUser.password, salt);
-
-    const admin = new User({
-      name: adminUser.name,
-      email: adminUser.email,
-      password: hashedPassword,
-      userType: adminUser.userType,
-      status: "active",
-      verificationStatus: "verified"
-    });
-
-    await admin.save();
-    
-    console.log('\n✅ Created admin user:');
-    console.log('Email:', admin.email);
-    console.log('Name:', admin.name);
-    console.log('\nLogin credentials:');
-    console.log('Email:', adminUser.email);
-    console.log('Password:', adminUser.password);
-    
-    process.exit(0);
-  } catch (err) {
-    console.error('Error:', err);
-    process.exit(1);
+    const passwordHash = await bcrypt.hash(password, 12);
+    if (admin) {
+      if (admin.userType === 'patient') admin.userType = 'admin';
+      admin.email = email;
+      admin.password = passwordHash;
+      admin.mustChangePassword = true;
+      await admin.save();
+      console.log('Admin credentials updated. Initial password was not printed; change it at first login.');
+    } else {
+      await User.create({ name: 'System Admin', email, password: passwordHash, userType: 'admin', accountStatus: 'active', mustChangePassword: true, verificationStatus: 'verified' });
+      console.log('Admin account created. Initial password was not printed; change it at first login.');
+    }
+  } catch (error) {
+    console.error(`Admin account provisioning failed (${error.code || error.name || 'unknown error'}).`);
+    process.exitCode = 1;
+  } finally {
+    const mongoose = require('mongoose');
+    await mongoose.disconnect().catch(() => {});
   }
 }
 

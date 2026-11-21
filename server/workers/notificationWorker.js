@@ -1,175 +1,86 @@
 const cron = require('node-cron');
 const Notification = require('../models/Notification');
 const TherapySession = require('../models/TherapySession');
-const User = require('../models/User');
+const PatientFollowUp = require('../models/PatientFollowUp');
 const nodemailer = require('nodemailer');
-const twilio = require('twilio');
-const { normalizePhone } = require('../utils/phone');
+const { notifyUsers, notifyAdmins } = require('../utils/notifications');
 
+const SMTP_HOST = process.env.SMTP_HOST; const SMTP_USER = process.env.SMTP_USER; const SMTP_PASS = process.env.SMTP_PASS;
 const EMAIL_FROM = process.env.EMAIL_FROM;
-const SMTP_HOST = process.env.SMTP_HOST;
-const SMTP_USER = process.env.SMTP_USER;
-const SMTP_PASS = process.env.SMTP_PASS;
-// Accept either TWILIO_SID/TWILIO_TOKEN or TWILIO_ACCOUNT_SID/TWILIO_AUTH_TOKEN
-const TWILIO_SID = process.env.TWILIO_SID || process.env.TWILIO_ACCOUNT_SID;
-const TWILIO_TOKEN = process.env.TWILIO_TOKEN || process.env.TWILIO_AUTH_TOKEN;
-const TWILIO_FROM = process.env.TWILIO_FROM;
-const TWILIO_WHATSAPP_FROM_RAW = process.env.TWILIO_WHATSAPP_FROM;
-const TWILIO_STATUS_CALLBACK_URL = process.env.TWILIO_STATUS_CALLBACK_URL;
+const transporter = SMTP_HOST && SMTP_USER && SMTP_PASS ? nodemailer.createTransport({ host: SMTP_HOST, auth: { user: SMTP_USER, pass: SMTP_PASS } }) : null;
+const clinicTimezone = process.env.CLINIC_TIMEZONE || process.env.TZ || 'Asia/Kolkata';
 
-let transporter = null;
-if (SMTP_HOST && SMTP_USER && SMTP_PASS) {
-  transporter = nodemailer.createTransport({ host: SMTP_HOST, auth: { user: SMTP_USER, pass: SMTP_PASS } });
+function datePartsInZone(date, timeZone) {
+  const parts = new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hourCycle: 'h23' }).formatToParts(date);
+  return Object.fromEntries(parts.filter((part) => part.type !== 'literal').map((part) => [part.type, Number(part.value)]));
 }
 
-let twilioClient = null;
-if (TWILIO_SID && TWILIO_TOKEN) {
-  twilioClient = twilio(TWILIO_SID, TWILIO_TOKEN);
+function clinicLocalDateTime(dateValue, timeValue, timeZone = clinicTimezone) {
+  const dateText = dateValue instanceof Date ? dateValue.toISOString().slice(0, 10) : String(dateValue).slice(0, 10);
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(dateText) || !/^\d{2}:\d{2}$/.test(String(timeValue))) return null;
+  const [year, month, day] = dateText.split('-').map(Number); const [hour, minute] = timeValue.split(':').map(Number);
+  const target = Date.UTC(year, month - 1, day, hour, minute);
+  let candidate = target;
+  for (let index = 0; index < 2; index++) {
+    const parts = datePartsInZone(new Date(candidate), timeZone);
+    const observed = Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute);
+    candidate += target - observed;
+  }
+  return new Date(candidate);
 }
 
-async function sendEmail(to, subject, text) {
-  if (!transporter) throw new Error('SMTP not configured');
-  return transporter.sendMail({ from: EMAIL_FROM || SMTP_USER, to, subject, text });
-}
-
-async function sendSms(to, body) {
-  if (!twilioClient) throw new Error('Twilio not configured');
-  const normalized = normalizePhone(to) || to;
-  const opts = { from: TWILIO_FROM, to: normalized, body };
-  if (TWILIO_STATUS_CALLBACK_URL) opts.statusCallback = TWILIO_STATUS_CALLBACK_URL;
-  // single retry on transient failure
+async function deliverOptInEmail(user, notification) {
+  if (!transporter || user.notificationPreferences?.email !== true || !user.email) return;
+  const claimAfter = new Date(Date.now() - 15 * 60 * 1000);
+  const claimed = await Notification.findOneAndUpdate(
+    { _id: notification._id, emailSentAt: { $exists: false }, $or: [{ emailClaimedAt: { $exists: false } }, { emailClaimedAt: { $lt: claimAfter } }] },
+    { $set: { emailClaimedAt: new Date() } }, { new: true }
+  );
+  if (!claimed) return;
   try {
-    return await twilioClient.messages.create(opts);
-  } catch (err) {
-    console.warn('sendSms failed, retrying once', err && err.message);
-    return twilioClient.messages.create(opts);
+    await transporter.sendMail({ from: EMAIL_FROM || SMTP_USER, to: user.email, subject: notification.payload?.title || 'AyurSutra reminder', text: notification.payload?.body || 'You have an AyurSutra update.' });
+    await Notification.updateOne({ _id: notification._id }, { $set: { emailSentAt: new Date(), sentAt: new Date(), status: 'sent', channel: 'email' }, $unset: { emailClaimedAt: 1 } });
+  } catch (error) {
+    await Notification.updateOne({ _id: notification._id }, { $set: { status: 'failed', error: 'Email delivery failed' }, $unset: { emailClaimedAt: 1 } });
+    console.error('Reminder email delivery failed:', error.name);
   }
 }
 
-async function sendWhatsApp(to, body) {
-  if (!twilioClient) throw new Error('Twilio not configured');
-  if (!TWILIO_WHATSAPP_FROM_RAW) throw new Error('TWILIO_WHATSAPP_FROM not configured');
-  // Allow TWILIO_WHATSAPP_FROM to be provided either as "+<number>" or "whatsapp:+<number>"
-  const from = TWILIO_WHATSAPP_FROM_RAW.startsWith('whatsapp:') ? TWILIO_WHATSAPP_FROM_RAW : `whatsapp:${TWILIO_WHATSAPP_FROM_RAW}`;
-  const normalized = normalizePhone(to) || to;
-  const toNumber = String(normalized).startsWith('whatsapp:') ? normalized : `whatsapp:${normalized}`;
-  const opts = { from, to: toNumber, body };
-  if (TWILIO_STATUS_CALLBACK_URL) opts.statusCallback = TWILIO_STATUS_CALLBACK_URL;
-  try {
-    return await twilioClient.messages.create(opts);
-  } catch (err) {
-    console.warn('sendWhatsApp failed, retrying once', err && err.message);
-    return twilioClient.messages.create(opts);
-  }
-}
-
-// This job runs every 5 minutes and schedules notifications for sessions
-// starting within the next X minutes (e.g., 60 minutes). It creates Notification docs
-// and attempts to send email/SMS if provider credentials are present.
-function startNotificationWorker() {
-  // run every 5 minutes
-  cron.schedule('*/5 * * * *', async () => {
-    try {
-      const lookaheadMinutes = parseInt(process.env.NOTIFY_LOOKAHEAD_MINUTES || '60', 10);
-  const now = new Date();
+async function runNotificationSweep(now = new Date()) {
+  const lookaheadMinutes = Math.min(1440, Math.max(1, Number.parseInt(process.env.NOTIFY_LOOKAHEAD_MINUTES || '60', 10) || 60));
   const upper = new Date(now.getTime() + lookaheadMinutes * 60000);
-
-  // Find sessions scheduled between now and upper (compare full Date stored in `date`)
-  // TherapySession.date is a Date field; query using Date objects for accuracy.
-  const sessions = await TherapySession.find({
-    date: { $gte: now, $lte: upper },
-    status: { $ne: 'cancelled' }
-  }).populate('patient practitioner');
-
-      for (const s of sessions) {
-        try {
-          // Build scheduled DateTime: assume s.date is YYYY-MM-DD and s.startTime is HH:MM
-          if (!s.startTime || !s.date) {
-            console.log('Skipping session without date/startTime', s._id.toString());
-            continue;
-          }
-          const [hh, mm] = s.startTime.split(':').map(Number);
-          const scheduledAt = new Date(s.date);
-          scheduledAt.setHours(hh, mm, 0, 0);
-
-          // Only notify if scheduledAt is within lookahead window
-          if (scheduledAt < now || scheduledAt > upper) {
-            console.log('Session outside lookahead window, skipping', { sessionId: s._id.toString(), scheduledAt: scheduledAt.toISOString(), now: now.toISOString(), upper: upper.toISOString() });
-            continue;
-          }
-
-          // Create in-app notification for patient and practitioner
-          const recipients = [s.patient, s.practitioner].filter(Boolean);
-          for (const user of recipients) {
-            // Skip if user has no contact info
-            try {
-              const payload = { title: 'Therapy Reminder', body: `Your session ${s.sessionName || ''} is at ${s.startTime} on ${new Date(s.date).toLocaleDateString()}` };
-              const existing = await Notification.findOne({ user: user._id, session: s._id, scheduledAt });
-              if (existing) { console.log('Notification already exists for user/session', { user: user._id.toString(), session: s._id.toString(), scheduledAt: scheduledAt.toISOString() }); continue; }
-
-              const note = new Notification({ user: user._id, session: s._id, channel: 'in-app', payload, scheduledAt });
-              await note.save();
-
-              // Attempt to send email or SMS immediately if configured
-              if (user.email && transporter) {
-                try {
-                  await sendEmail(user.email, payload.title, payload.body);
-                  note.status = 'sent';
-                  note.sentAt = new Date();
-                  await note.save();
-                } catch (err) {
-                  console.error('Email send error', err);
-                  note.status = 'failed';
-                  note.error = err.message;
-                  await note.save();
-                }
-              } else if (user.phone && twilioClient) {
-                try {
-                  // Prefer WhatsApp if configured, otherwise send SMS
-                  try {
-                    let result = null;
-                    if (TWILIO_WHATSAPP_FROM_RAW) {
-                      // set channel before sending so state reflects intent; Note schema updated to allow 'whatsapp'
-                      note.channel = 'whatsapp';
-                      result = await sendWhatsApp(user.phone, payload.body);
-                      console.log('WhatsApp send result', result && result.sid);
-                    } else {
-                      note.channel = 'sms';
-                      result = await sendSms(user.phone, payload.body);
-                      console.log('SMS send result', result && result.sid);
-                    }
-                    note.status = 'sent';
-                    note.sentAt = new Date();
-                    if (result && result.sid) note.twilioSid = result.sid;
-                    note.sendResponse = result || note.sendResponse;
-                    try { await note.save(); } catch(saveErr){ console.error('Failed saving notification after send', saveErr); }
-                  } catch (err) {
-                    console.error('Messaging send error', err);
-                    note.status = 'failed';
-                    note.error = err.message;
-                    try { await note.save(); } catch(saveErr){ console.error('Failed saving failed-notification', saveErr); }
-                  }
-                } catch (err) {
-                  console.error('Messaging send error', err);
-                  note.status = 'failed';
-                  note.error = err.message;
-                  await note.save();
-                }
-              } else {
-                // no delivery channel configured, leave as in-app pending
-              }
-            } catch (innerErr) {
-              console.error('Error creating notification for session', s._id, innerErr);
-            }
-          }
-        } catch (err) {
-          console.error('Error processing session for notifications', s._id, err);
-        }
-      }
-    } catch (err) {
-      console.error('Notification worker error', err);
+  const queryFrom = new Date(now.getTime() - 48 * 60 * 60 * 1000); const queryTo = new Date(upper.getTime() + 48 * 60 * 60 * 1000);
+  const sessions = await TherapySession.find({ date: { $gte: queryFrom, $lte: queryTo }, status: { $in: ['scheduled', 'confirmed'] } }).populate('patient', 'name email notificationPreferences').populate('practitioner', 'name email notificationPreferences').lean();
+  for (const session of sessions) {
+    const scheduledAt = clinicLocalDateTime(session.date, session.startTime);
+    if (!scheduledAt || scheduledAt < now || scheduledAt > upper) continue;
+    const title = 'Upcoming therapy session'; const day = new Intl.DateTimeFormat('en-IN', { dateStyle: 'medium', timeZone: clinicTimezone }).format(scheduledAt);
+    const body = `${session.therapySnapshot?.name || session.therapyType || 'Therapy'} is scheduled for ${day} at ${session.startTime}.`;
+    const dateKey = session.date instanceof Date ? session.date.toISOString().slice(0, 10) : String(session.date).slice(0, 10);
+    const dedupeKey = `session-reminder:${session._id}:${dateKey}:${session.startTime}`;
+    const recipients = [session.patient, session.practitioner].filter((user) => user && user.notificationPreferences?.sessionReminders !== false);
+    await notifyUsers(recipients.map((user) => user._id), 'session-reminder', title, body, { dedupeKey, scheduledAt, reminder: 'session', sessionId: session._id });
+    const notes = await Notification.find({ dedupeKey: { $in: recipients.map((user) => `${dedupeKey}:${user._id}`) } });
+    for (const note of notes) {
+      const recipient = recipients.find((user) => String(user._id) === String(note.user));
+      if (recipient) await deliverOptInEmail(recipient, note);
     }
-  });
+  }
+
+  const followUps = await PatientFollowUp.find({ dueAt: { $gte: now, $lte: upper }, status: 'pending' }).populate('patient', 'name email notificationPreferences').populate('practitioner', 'name email notificationPreferences').lean();
+  for (const followUp of followUps) {
+    const recipients = [followUp.patient, followUp.practitioner].filter((user) => user && user.notificationPreferences?.followUpReminders !== false);
+    await notifyUsers(recipients.map((user) => user._id), 'follow-up-scheduled', 'Follow-up reminder', `A follow-up is scheduled for ${new Intl.DateTimeFormat('en-IN', { dateStyle: 'medium', timeZone: clinicTimezone }).format(followUp.dueAt)}.`, { dedupeKey: `follow-up-reminder:${followUp._id}`, scheduledAt: followUp.dueAt, reminder: 'follow-up' });
+    await notifyAdmins('follow-up-scheduled', 'Pending follow-up reminder', 'A patient follow-up is due soon.', { dedupeKey: `follow-up-reminder-admin:${followUp._id}`, scheduledAt: followUp.dueAt });
+  }
 }
 
-module.exports = { startNotificationWorker };
+async function startNotificationWorker() {
+  await Notification.createIndexes();
+  cron.schedule('*/5 * * * *', async () => {
+    try { await runNotificationSweep(); }
+    catch (error) { console.error('Notification worker failed:', error.name); }
+  }, { timezone: clinicTimezone });
+}
+
+module.exports = { startNotificationWorker, runNotificationSweep, clinicLocalDateTime };

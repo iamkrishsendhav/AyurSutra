@@ -1,8 +1,41 @@
+import defaultTheme from 'tailwindcss/defaultTheme.js';
+
 /** @type {import('tailwindcss').Config} */
+const densitySpacing = Object.fromEntries(
+  Object.entries(defaultTheme.spacing).map(([key, value]) => [
+    key,
+    `calc(${value} * var(--ui-density))`,
+  ]),
+);
+
+const existingFontSizes = {
+  '2xs': ['0.625rem', { lineHeight: '0.75rem' }],
+  '3xl': ['1.875rem', { lineHeight: '2.25rem', letterSpacing: '-0.02em' }],
+  '4xl': ['2.25rem', { lineHeight: '2.5rem', letterSpacing: '-0.025em' }],
+  '5xl': ['3rem', { lineHeight: '3.25rem', letterSpacing: '-0.03em' }],
+  '6xl': ['3.75rem', { lineHeight: '3.75rem', letterSpacing: '-0.035em' }],
+  '7xl': ['4.5rem', { lineHeight: '4.5rem', letterSpacing: '-0.04em' }],
+};
+
+const compactFontSizes = Object.fromEntries(
+  Object.entries({ ...defaultTheme.fontSize, ...existingFontSizes }).map(([key, [size, options = {}]]) => {
+    const lineHeight = options.lineHeight;
+    const scaledLineHeight = typeof lineHeight === 'string' && /(?:rem|px|em|%)$/.test(lineHeight)
+      ? `calc(${lineHeight} * var(--ui-type-density))`
+      : lineHeight;
+
+    return [key, [
+      `max(0.75rem, calc(${size} * var(--ui-type-density)))`,
+      { ...options, ...(scaledLineHeight ? { lineHeight: scaledLineHeight } : {}) },
+    ]];
+  }),
+);
+
 export default {
   content: ["./index.html", "./src/**/*.{js,ts,jsx,tsx}"],
   theme: {
     extend: {
+      spacing: densitySpacing,
       colors: {
         sage: {
           50: "#f8faf8",
@@ -72,20 +105,7 @@ export default {
         body: ["Mukta", "system-ui", "sans-serif"],
         decorative: ["Rozha One", "serif"], // For special headings and titles
       },
-      fontSize: {
-        "2xs": ["0.625rem", { lineHeight: "0.75rem" }],
-        "3xl": [
-          "1.875rem",
-          { lineHeight: "2.25rem", letterSpacing: "-0.02em" },
-        ],
-        "4xl": ["2.25rem", { lineHeight: "2.5rem", letterSpacing: "-0.025em" }],
-        "5xl": ["3rem", { lineHeight: "3.25rem", letterSpacing: "-0.03em" }],
-        "6xl": [
-          "3.75rem",
-          { lineHeight: "3.75rem", letterSpacing: "-0.035em" },
-        ],
-        "7xl": ["4.5rem", { lineHeight: "4.5rem", letterSpacing: "-0.04em" }],
-      },
+      fontSize: compactFontSizes,
       backgroundImage: {
         "mandala-pattern": "url('/patterns/mandala-bg.svg')",
         "ayurvedic-herbs": "url('/patterns/herbs-bg.svg')",

@@ -1,147 +1,53 @@
-import React, { useEffect, useState, useRef } from 'react';
-import axios from 'axios';
+import React, { useCallback, useEffect, useState } from 'react';
 import { useToast } from '../contexts/ToastContext.jsx';
+import authFetch from '../utils/apiClient';
+
+async function bodyOf(response) { let body; try { body = await response.json(); } catch { body = {}; } if (!response.ok) throw new Error(body.message || 'Communication request failed'); return body; }
 
 const ChatPanel = ({ currentUserEmail, currentUserId, userType }) => {
-  const [messages, setMessages] = useState([]);
-  const [text, setText] = useState("");
-  const [contacts, setContacts] = useState([]); // patients or practitioners depending on role
-  const [selectedContactId, setSelectedContactId] = useState(null);
-
-  useEffect(() => {
-    // load contacts depending on role: practitioners for patients, patients for practitioners
-    async function loadContacts() {
-      try {
-        const endpoint = userType === "patient" ? "practitioners" : "patients";
-        const res = await axios.get(`http://localhost:5000/api/auth/${endpoint}`);
-        setContacts(res.data || []);
-        if (res.data && res.data.length) {
-          // for patients auto-select the first practitioner; for practitioners select first patient
-          setSelectedContactId(res.data[0]._id);
-        }
-      } catch (err) {
-        console.error("Fetch contacts error", err);
-      }
-    }
-    loadContacts();
-  }, [userType]);
-
-  useEffect(() => {
-    if (!currentUserId || !selectedContactId) return;
-    fetchConversation();
-    const iv = setInterval(fetchConversation, 3000);
-    return () => clearInterval(iv);
-  }, [currentUserId, selectedContactId]);
-
-  // Inbox polling moved to App.jsx so header badge remains consistent
-
-  const lastMessageIdRef = useRef(null);
+  const [messages, setMessages] = useState([]); const [text, setText] = useState('');
+  const [contacts, setContacts] = useState([]); const [selectedContactId, setSelectedContactId] = useState('');
+  const [state, setState] = useState('loading'); const [error, setError] = useState(''); const [sending, setSending] = useState(false); const [unreadCount, setUnreadCount] = useState(0);
   const { show } = useToast();
 
-  async function fetchConversation() {
+  useEffect(() => {
+    let active = true;
+    authFetch('/api/messages/contacts').then(bodyOf).then((data) => { if (!active) return; const values = data.contacts || []; setContacts(values); setSelectedContactId((current) => current || values[0]?._id || ''); setState('loaded'); }).catch((err) => { if (active) { setError(err.message); setState('error'); } });
+    return () => { active = false; };
+  }, [userType]);
+
+  const fetchConversation = useCallback(async () => {
+    if (!selectedContactId) { setMessages([]); return; }
     try {
-      const res = await axios.get('http://localhost:5000/api/messages/conversation', {
-        params: { userAId: currentUserId, userBId: selectedContactId }
-      });
-      const conv = res.data || [];
+      const conversationResponse = await authFetch(`/api/messages/conversation?otherUserId=${encodeURIComponent(selectedContactId)}`);
+      const conversation = await bodyOf(conversationResponse);
+      const inbox = await bodyOf(await authFetch('/api/messages/inbox?unreadOnly=true'));
+      setMessages(Array.isArray(conversation) ? conversation : []); setUnreadCount(Number(inbox.unreadCount) || 0); setState('loaded'); setError('');
+    } catch (err) { setError(err.message); setState('error'); }
+  }, [selectedContactId]);
 
-      // Detect newly arrived message
-      if (conv.length) {
-        const last = conv[conv.length - 1];
-        if (lastMessageIdRef.current && last._id !== lastMessageIdRef.current) {
-          console.log('ChatPanel: detected new message', { lastId: last._id, lastFrom: last.from?.email, currentUserEmail });
-          // If the last message is from the other user, show an in-app toast and add to global notifications
-          if (last.from?.email && last.from.email !== currentUserEmail) {
-            show({ title: `New message from ${last.from.name}`, message: last.text });
-            console.log('ChatPanel: showed toast for incoming message (no global notification added)');
-          }
-        }
-        lastMessageIdRef.current = last._id;
-      } else {
-        lastMessageIdRef.current = null;
-      }
+  useEffect(() => { fetchConversation(); const timer = setInterval(fetchConversation, 15000); return () => clearInterval(timer); }, [fetchConversation]);
 
-      setMessages(conv);
-    } catch (err) {
-      console.error("Fetch conversation error", err);
-    }
+  async function sendMessage(event) {
+    event?.preventDefault(); if (!text.trim() || !selectedContactId || sending) return;
+    setSending(true);
+    try {
+      await bodyOf(await authFetch('/api/messages', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ toId: selectedContactId, text: text.trim() }) }));
+      setText(''); await fetchConversation();
+    } catch (err) { setError(err.message); show({ title: 'Message not sent', message: err.message }); }
+    finally { setSending(false); }
   }
 
-  async function sendMessage() {
-    if (!text.trim() || !selectedContactId) return;
-    try {
-      await axios.post("http://localhost:5000/api/messages", {
-        fromId: currentUserId,
-        toId: selectedContactId,
-        text,
-      });
-      setText("");
-      fetchConversation();
-    } catch (err) {
-      console.error("Send message error", err);
-    }
-  }
-
-  return (
-    <div className="bg-gradient-to-br from-amber-50/50 to-orange-50/50 p-6 rounded-lg shadow-sm border border-amber-100">
-      <h3 className="text-lg font-semibold text-amber-900 mb-4 flex items-center">
-        <div className="mr-2 w-1 h-6 bg-gradient-to-b from-amber-500 to-orange-500 rounded-full"></div>
-        Chat
-      </h3>
-      <div className="mb-4">
-        <label className="text-sm font-medium text-amber-800 block mb-2">
-          Select contact
-        </label>
-        <select
-          className="w-full p-2.5 bg-white/80 border border-amber-200 text-amber-900 rounded-lg focus:ring-2 focus:ring-amber-500 focus:border-amber-500"
-          value={selectedContactId || ""}
-          onChange={(e) => setSelectedContactId(e.target.value)}
-        >
-          {contacts.map((p) => (
-            <option key={p._id} value={p._id} className="text-amber-900">
-              {p.name} ({p.email})
-            </option>
-          ))}
-        </select>
-      </div>
-
-      <div className="h-64 overflow-auto border border-amber-200 rounded-lg p-4 mb-4 bg-white/80">
-        {messages.map((m) => (
-          <div
-            key={m._id}
-            className={`mb-3 ${
-              m.from.email === currentUserEmail ? "text-right" : "text-left"
-            }`}
-          >
-            <div className="text-xs text-amber-600 mb-1">{m.from.name}</div>
-            <div
-              className={`inline-block p-3 rounded-lg max-w-[80%] ${
-                m.from.email === currentUserEmail
-                  ? "bg-gradient-to-br from-amber-500 to-orange-500 text-white shadow-sm"
-                  : "bg-gradient-to-br from-amber-50 to-orange-50 text-amber-900 border border-amber-200"
-              }`}
-            >
-              {m.text}
-            </div>
-          </div>
-        ))}
-      </div>
-      <div className="flex gap-3">
-        <input
-          value={text}
-          onChange={(e) => setText(e.target.value)}
-          className="flex-1 p-3 bg-white/80 border border-amber-200 rounded-lg text-amber-900 placeholder-amber-400 focus:ring-2 focus:ring-amber-500 focus:border-amber-500"
-          placeholder="Type your message..."
-        />
-        <button
-          onClick={sendMessage}
-          className="px-6 py-3 bg-gradient-to-r from-amber-600 to-orange-600 text-white rounded-lg shadow-md hover:from-amber-500 hover:to-orange-500 transition-all hover:shadow-lg"
-        >
-          Send
-        </button>
-      </div>
-    </div>
-  );
+  return <section className="rounded-lg border border-amber-100 bg-gradient-to-br from-amber-50/50 to-orange-50/50 p-5">
+    <div className="mb-3 flex flex-wrap items-center justify-between gap-2"><div><h3 className="font-semibold text-amber-900">Care team conversation</h3><p className="text-xs text-amber-700">{unreadCount} unread message{unreadCount === 1 ? '' : 's'}</p></div>{contacts.length > 1 && <select aria-label="Choose patient" value={selectedContactId} onChange={(event) => setSelectedContactId(event.target.value)} className="rounded border border-amber-200 bg-white p-2 text-sm">{contacts.map((contact) => <option key={contact._id} value={contact._id}>{contact.name}</option>)}</select>}</div>
+    {state === 'loading' && <p role="status" className="text-sm text-amber-800">Loading conversations…</p>}
+    {state === 'error' && <div role="alert" className="mb-3 text-sm text-red-800">{error} <button type="button" onClick={fetchConversation} className="underline">Retry</button></div>}
+    {state === 'loaded' && !contacts.length && <p className="rounded bg-white p-4 text-sm text-gray-600">Messaging is available after a practitioner is assigned to your account.</p>}
+    {!!contacts.length && <><div className="mb-3 h-64 space-y-3 overflow-y-auto rounded border border-amber-200 bg-white/80 p-4" aria-live="polite">
+      {messages.map((message) => { const mine = String(message.from?._id) === String(currentUserId) || message.from?.email === currentUserEmail; return <div key={message._id} className={mine ? 'text-right' : 'text-left'}><div className="mb-1 text-xs text-amber-700">{mine ? 'You' : message.from?.name || 'Care team'} · {new Date(message.createdAt).toLocaleString()}</div><p className={`inline-block max-w-[85%] whitespace-pre-wrap break-words rounded-lg px-3 py-2 text-sm ${mine ? 'bg-amber-600 text-white' : 'border border-amber-200 bg-amber-50 text-amber-950'}`}>{message.text}</p></div>; })}
+      {!messages.length && <p className="text-sm text-gray-500">No messages in this conversation yet.</p>}
+    </div><form onSubmit={sendMessage} className="flex gap-2"><label className="sr-only" htmlFor="care-message">Message</label><textarea id="care-message" rows="2" maxLength="5000" value={text} onChange={(event) => setText(event.target.value)} className="min-w-0 flex-1 resize-y rounded border border-amber-200 bg-white p-3 text-sm text-amber-950" placeholder="Write a secure message…"/><button type="submit" disabled={!text.trim() || sending} className="self-end rounded bg-gradient-to-r from-amber-600 to-orange-600 px-4 py-2 text-sm text-white disabled:opacity-50">{sending ? 'Sending…' : 'Send'}</button></form></>}
+  </section>;
 };
 
 export default ChatPanel;

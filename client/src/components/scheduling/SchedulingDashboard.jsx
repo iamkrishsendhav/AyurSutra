@@ -1,9 +1,9 @@
 import React, { useEffect, useState } from "react";
-import axios from "axios";
 import ProgressOverview from "../Dashboard/ProgressOverview";
 import QuickStats from "../Dashboard/QuickStats";
 import WellnessMetrics from "../Dashboard/WellnessMetrics";
 import UpcomingSessions from "./UpcomingSessions";
+import { authFetch } from "../../utils/apiClient";
 // ChatPanel removed from individual dashboards; now located on Notifications & Care page
 import NotificationsPanel from '../NotificationsPanel';
 
@@ -14,8 +14,9 @@ const Dashboard = ({ user }) => {
 
   const fetchSessions = async () => {
     try {
-      const res = await axios.get(`http://localhost:5000/api/sessions?userId=${user.email}&role=${user.userType}`);
-      setSessions(res.data);
+      const res = await authFetch("/sessions");
+      if (!res.ok) throw new Error("Unable to load sessions");
+      setSessions(await res.json());
     } catch (err) {
       console.error("Error fetching sessions:", err);
       setError("Failed to load sessions");
@@ -26,9 +27,11 @@ const Dashboard = ({ user }) => {
     if (user) {
       fetchSessions();
       if (user.userType === "patient") {
-        axios
-          .get(`http://localhost:5000/api/dashboard/patient/${user._id}`)
-          .then((res) => setPatientData(res.data))
+        authFetch('/api/dashboard/patient')
+          .then(async (res) => {
+            if (!res.ok) throw new Error('Unable to load patient dashboard');
+            setPatientData(await res.json());
+          })
           .catch((err) => {
             console.error("Error fetching patient dashboard:", err);
             setError("Failed to load patient data");

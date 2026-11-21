@@ -32,7 +32,7 @@ const Footer = () => {
             </span>
           </div>
           <div className="text-sm text-amber-700 text-center md:text-right">
-            <p className="font-medium">© 2025 AyurSutra</p>
+            <p className="font-medium">© 2026 AyurSutra</p>
             <p className="mt-1 text-amber-600 text-xs">
               Integrating traditional wisdom with modern technology
             </p>

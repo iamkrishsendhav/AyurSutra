@@ -27,7 +27,7 @@ const Progress = ({ user }) => {
   const fetchMyProgress = async () => {
     try {
       setLoading(true);
-      const response = await authFetch('http://localhost:5000/api/progress/my-progress', {
+      const response = await authFetch('/api/progress/my-progress', {
         method: 'GET',
         headers: {
           'Content-Type': 'application/json',

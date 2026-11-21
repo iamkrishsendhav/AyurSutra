@@ -1,15 +1,19 @@
 import React, { useState } from "react";
 import { useToast } from "../../contexts/ToastContext.jsx";
 import { Eye, EyeOff, Mail, Lock, User, Phone, ArrowLeft } from "lucide-react";
+import authFetch, { apiUrl } from '../../utils/apiClient';
 
 const SignupPage = ({ onSwitchToLogin, onSignupSuccess, onBackToLanding }) => {
+  const isPatient = true;
   const [formData, setFormData] = useState({
     name: "",
     email: "",
     phone: "",
     password: "",
     confirmPassword: "",
-    userType: "patient", // default selection
+    gender: '',
+    dateOfBirth: '',
+    address: { street: '', city: '', state: '', pincode: '', country: 'India' },
   });
 
   const [showPassword, setShowPassword] = useState(false);
@@ -26,7 +30,7 @@ const SignupPage = ({ onSwitchToLogin, onSignupSuccess, onBackToLanding }) => {
 
   const handleGoogleLogin = () => {
     // Redirect to Google OAuth endpoint
-    window.location.href = 'http://localhost:5000/api/auth/google';
+    window.location.href = apiUrl('/api/auth/google');
   };
 
   const handleSignup = async () => {
@@ -36,6 +40,11 @@ const SignupPage = ({ onSwitchToLogin, onSignupSuccess, onBackToLanding }) => {
         message: "Please fill in name, email and password",
         duration: 4000,
       });
+      return;
+    }
+
+    if (formData.password.length < 6 || formData.password.length > 128) {
+      show({ title: "Invalid password", message: "Password must be between 6 and 128 characters", duration: 4000 });
       return;
     }
 
@@ -49,10 +58,10 @@ const SignupPage = ({ onSwitchToLogin, onSignupSuccess, onBackToLanding }) => {
     }
 
     try {
-      const res = await fetch("http://localhost:5000/api/auth/signup", {
+      const res = await authFetch("/api/auth/signup", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(formData),
+        body: JSON.stringify({ name: formData.name, email: formData.email, phone: formData.phone, password: formData.password, gender: formData.gender, dateOfBirth: formData.dateOfBirth || undefined, address: formData.address }),
       });
 
       let data = null;
@@ -93,16 +102,11 @@ const SignupPage = ({ onSwitchToLogin, onSignupSuccess, onBackToLanding }) => {
   };
 
   // Dynamic backgrounds and accents
-  const isPatient = formData.userType === "patient";
-  const bgGradient = isPatient
-    ? "from-[#8B4513]/20 via-[#CD853F]/15 to-[#DEB887]/20"
-    : "from-[#8B4513]/20 via-[#CD853F]/15 to-[#DEB887]/20";
-  const patternUrl = isPatient
-    ? "/patterns/herbs-bg.svg"
-    : "/patterns/herbs-bg.svg";
-  const accentCircle = isPatient ? "bg-[#8B4513]/30" : "bg-[#8B4513]/30";
-  const accentCircle2 = isPatient ? "bg-[#CD853F]/20" : "bg-[#CD853F]/20";
-  const accentCircle3 = isPatient ? "bg-[#DEB887]/20" : "bg-[#DEB887]/20";
+  const bgGradient = "from-[#8B4513]/20 via-[#CD853F]/15 to-[#DEB887]/20";
+  const patternUrl = "/patterns/herbs-bg.svg";
+  const accentCircle = "bg-[#8B4513]/30";
+  const accentCircle2 = "bg-[#CD853F]/20";
+  const accentCircle3 = "bg-[#DEB887]/20";
 
   return (
     <div className="h-screen w-full flex relative overflow-hidden bg-gradient-to-br from-ayurveda-chandana/30 via-ayurveda-haldi/20 to-ayurveda-kumkum/20">
@@ -280,38 +284,7 @@ const SignupPage = ({ onSwitchToLogin, onSignupSuccess, onBackToLanding }) => {
           <h2 className="text-lg font-display text-dosha-kapha mb-3 text-center">
             Create Your Account
           </h2>
-
-          {/* Role Switcher at Top */}
-          <div className="flex justify-center mb-3">
-            <div className="flex bg-ayurveda-chandana/10 rounded-full p-1 shadow-inner border border-ayurveda-chandana/20">
-              <button
-                type="button"
-                className={`px-4 py-1.5 rounded-full font-medium transition-all duration-200 focus:outline-none text-sm ${
-                  formData.userType === "patient"
-                    ? "bg-gradient-to-r from-ayurveda-brahmi to-ayurveda-neem text-white shadow-md scale-105"
-                    : "text-ayurveda-brahmi hover:bg-ayurveda-brahmi/10"
-                }`}
-                onClick={() =>
-                  setFormData({ ...formData, userType: "patient" })
-                }
-              >
-                रोगी / Patient
-              </button>
-              <button
-                type="button"
-                className={`px-4 py-1.5 rounded-full font-medium transition-all duration-200 focus:outline-none text-sm ${
-                  formData.userType === "practitioner"
-                    ? "bg-gradient-to-r from-ayurveda-kumkum to-ayurveda-haldi text-white shadow-md scale-105"
-                    : "text-ayurveda-kumkum hover:bg-ayurveda-kumkum/10"
-                }`}
-                onClick={() =>
-                  setFormData({ ...formData, userType: "practitioner" })
-                }
-              >
-                वैद्य / Practitioner
-              </button>
-            </div>
-          </div>
+          <p className="mb-3 text-center text-sm text-amber-800">Patient account registration</p>
           <div className="space-y-3">
             {/* Name */}
             <div className="space-y-0.5">
@@ -369,6 +342,13 @@ const SignupPage = ({ onSwitchToLogin, onSignupSuccess, onBackToLanding }) => {
               </div>
             </div>
 
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="text-xs font-semibold text-gray-700">Gender<select name="gender" value={formData.gender} onChange={handleInputChange} className="mt-1 block w-full rounded-lg border border-amber-200 bg-white px-3 py-2 text-sm"><option value="">Prefer not to say</option><option value="female">Female</option><option value="male">Male</option><option value="other">Other</option></select></label>
+              <label className="text-xs font-semibold text-gray-700">Date of birth<input type="date" name="dateOfBirth" max={new Date().toISOString().slice(0, 10)} value={formData.dateOfBirth} onChange={handleInputChange} className="mt-1 block w-full rounded-lg border border-amber-200 bg-white px-3 py-2 text-sm" /></label>
+            </div>
+            <fieldset className="grid gap-2 rounded-lg border border-amber-100 p-3 sm:grid-cols-2"><legend className="px-1 text-xs font-semibold text-gray-700">Address</legend>
+              {['street', 'city', 'state', 'pincode'].map((field) => <label key={field} className="text-xs capitalize text-gray-700">{field}<input value={formData.address[field]} onChange={(event) => setFormData((current) => ({ ...current, address: { ...current.address, [field]: event.target.value } }))} maxLength={field === 'street' ? 200 : 100} className="mt-1 block w-full rounded-lg border border-amber-200 bg-white px-3 py-2 text-sm" /></label>)}
+            </fieldset>
             {/* Password */}
             <div className="space-y-1">
               <label className="text-xs font-semibold text-gray-700 tracking-wide">
@@ -381,6 +361,8 @@ const SignupPage = ({ onSwitchToLogin, onSignupSuccess, onBackToLanding }) => {
                   name="password"
                   value={formData.password}
                   onChange={handleInputChange}
+                  minLength={6}
+                  maxLength={128}
                   className="w-full pl-8 pr-9 py-2 bg-white/70 backdrop-blur-md border-2 border-gray-100 rounded-xl focus:ring-4 focus:ring-ayurveda-kumkum/20 focus:border-ayurveda-kumkum hover:border-ayurveda-kumkum/50 transition-all duration-200 placeholder:text-gray-400 text-gray-700 text-sm"
                   placeholder="Enter your password"
                   required
@@ -411,6 +393,8 @@ const SignupPage = ({ onSwitchToLogin, onSignupSuccess, onBackToLanding }) => {
                   name="confirmPassword"
                   value={formData.confirmPassword}
                   onChange={handleInputChange}
+                  minLength={6}
+                  maxLength={128}
                   className="w-full pl-8 pr-9 py-2 bg-white/70 backdrop-blur-md border-2 border-gray-100 rounded-xl focus:ring-4 focus:ring-ayurveda-kumkum/20 focus:border-ayurveda-kumkum hover:border-ayurveda-kumkum/50 transition-all duration-200 placeholder:text-gray-400 text-gray-700 text-sm"
                   placeholder="Confirm your password"
                   required

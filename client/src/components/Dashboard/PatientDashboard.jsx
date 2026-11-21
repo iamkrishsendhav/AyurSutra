@@ -1,5 +1,5 @@
-import React, { useEffect, useState } from "react";
-import axios from "axios";
+﻿import React, { useEffect, useState } from "react";
+import authFetch from "../../utils/apiClient";
 import { User, MapPin, Phone, Calendar, ArrowRight, CheckCircle, AlertCircle } from "lucide-react";
 import NotificationsPanel from "../NotificationsPanel";
 
@@ -9,25 +9,38 @@ const lotusBackground = "/patterns/lotus-bg.svg";
 const mandalaBackground = "/patterns/mandala-bg.svg";
 const herbsBackground = "/patterns/herbs-bg.svg";
 
-const PatientDashboard = ({ user, patientProgress, notifications }) => {
+const PatientDashboard = ({ user, patientProgress, notifications, onNavigate }) => {
   const [data, setData] = useState(null);
+  const [profile, setProfile] = useState(null);
+  const [loadState, setLoadState] = useState("loading");
 
   useEffect(() => {
-    if (!user?._id) return;
-
-    axios
-      .get(`http://localhost:5000/api/dashboard/patient/${user._id}`)
-      .then((res) => {
-        console.log("✅ Patient Dashboard Data:", res.data);
-        setData(res.data);
-      })
-      .catch((err) => console.error("❌ Patient Dashboard Error:", err));
-  }, [user]);
+    let active = true;
+    const load = async () => {
+      try {
+        const [profileResponse, dashboardResponse] = await Promise.all([
+          authFetch("/api/profile"),
+          authFetch("/api/dashboard/patient"),
+        ]);
+        if (profileResponse.status === 401 || dashboardResponse.status === 401) {
+          localStorage.removeItem("token");
+          throw new Error("unauthorized");
+        }
+        if (!profileResponse.ok || !dashboardResponse.ok) throw new Error("request_failed");
+        const [profileData, dashboardData] = await Promise.all([profileResponse.json(), dashboardResponse.json()]);
+        if (active) { setProfile(profileData); setData(dashboardData); setLoadState("loaded"); }
+      } catch {
+        if (active) setLoadState("error");
+      }
+    };
+    load();
+    return () => { active = false; };
+  }, []);
 
   return (
-    <div className="min-h-screen bg-[#FDF7E9] w-full">
+    <div className="as-page w-full">
       {/* Main Container */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 space-y-4 py-4">
+      <div className="mx-auto max-w-7xl space-y-5 px-4 py-5 sm:px-6 lg:px-8">
         {/* Background Decorations */}
         <div className="fixed top-0 right-0 w-32 h-32 opacity-10 pointer-events-none">
           <img src={cornerMandala} alt="" className="w-full h-full" />
@@ -37,24 +50,21 @@ const PatientDashboard = ({ user, patientProgress, notifications }) => {
         </div>
 
         {/* Welcome Card */}
-        <div className="relative bg-gradient-to-r from-amber-50 to-orange-50 p-6 rounded-xl shadow-md border border-amber-100 overflow-hidden">
+        <section className="relative overflow-hidden rounded-2xl border border-amber-200 bg-gradient-to-r from-amber-50 to-orange-50 p-5 shadow-sm sm:p-7">
           <div className="absolute top-0 right-0 w-32 h-32 opacity-5">
             <img src={mandalaBackground} alt="" className="w-full h-full" />
           </div>
-          <div className="flex justify-between items-center">
+          <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
             <div>
-              <h2 className="text-2xl font-semibold text-amber-900">
-                Namaste, {user.name}
-              </h2>
-              <p className="text-amber-700 mt-2">
-                Continue your path to wellness and balance. Your next healing
-                session awaits in 2 days.
-              </p>
+              <h1 className="text-2xl font-semibold tracking-tight text-amber-950 sm:text-3xl">
+                {loadState === "loading" ? "Loading your profile…" : loadState === "loaded" ? `Namaste, ${profile?.name || "Patient"}` : "Unable to load your profile"}
+              </h1>
+              <p className="text-amber-700 mt-2">{profile?.email || (loadState === "error" ? "Your session may have expired. Please sign in again." : "Continue your path to wellness and balance.")}</p>
             </div>
-            <div className="text-right">
+            <div className="sm:min-w-28 sm:text-right">
               <div className="relative">
                 <span className="text-4xl font-bold text-amber-600">
-                  {data?.progress || 0}%
+                  {data?.progress == null ? '—' : `${data.progress}%`}
                 </span>
                 <div className="absolute -top-3 -right-3 w-20 h-20 opacity-10">
                   <img src={herbsBackground} alt="" className="w-full h-full" />
@@ -63,47 +73,48 @@ const PatientDashboard = ({ user, patientProgress, notifications }) => {
               <p className="text-sm text-amber-700">Journey Progress</p>
             </div>
           </div>
-        </div>
+        </section>
 
         {/* Practitioner Assignment Section */}
-        {!data?.hasPractitioner && (
-          <div className="bg-gradient-to-r from-blue-50 to-indigo-50 p-6 rounded-xl shadow-md border border-blue-100 relative overflow-hidden">
+        {loadState === 'loaded' && !data?.hasPractitioner && (
+          <section className="relative overflow-hidden rounded-2xl border border-amber-200 bg-white p-5 shadow-sm sm:p-6">
             <div className="absolute top-0 right-0 w-32 h-32 opacity-5">
               <img src={mandalaBackground} alt="" className="w-full h-full" />
             </div>
-            <div className="flex items-center justify-between">
-              <div className="flex items-center">
-                <div className="w-12 h-12 bg-blue-100 rounded-full flex items-center justify-center mr-4">
-                  <AlertCircle className="h-6 w-6 text-blue-600" />
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-start gap-3 sm:items-center">
+                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-amber-100">
+                  <AlertCircle className="h-6 w-6 text-amber-700" />
                 </div>
                 <div>
-                  <h3 className="text-lg font-semibold text-blue-900">No Practitioner Assigned</h3>
-                  <p className="text-blue-700">Find and assign a practitioner to get started with your treatment journey.</p>
+                  <h2 className="text-lg font-semibold text-amber-950">No Practitioner Assigned</h2>
+                  <p className="mt-1 text-sm leading-6 text-amber-800">Find and assign a practitioner to get started with your treatment journey.</p>
                 </div>
               </div>
               <button
-                onClick={() => window.location.href = '/?tab=practitioner-search'}
-                className="px-6 py-3 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors flex items-center"
+                type="button"
+                onClick={() => onNavigate?.('practitioner-search')}
+                className="inline-flex min-h-11 shrink-0 items-center justify-center rounded-lg bg-amber-700 px-5 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-amber-800"
               >
                 Find Practitioner
                 <ArrowRight className="h-4 w-4 ml-2" />
               </button>
             </div>
-          </div>
+          </section>
         )}
 
         {data?.hasPractitioner && data?.assignedPractitioner && (
-          <div className="bg-gradient-to-r from-green-50 to-emerald-50 p-6 rounded-xl shadow-md border border-green-100 relative overflow-hidden">
+          <section className="relative overflow-hidden rounded-2xl border border-emerald-200 bg-emerald-50/50 p-5 shadow-sm sm:p-6">
             <div className="absolute top-0 right-0 w-32 h-32 opacity-5">
               <img src={mandalaBackground} alt="" className="w-full h-full" />
             </div>
-            <div className="flex items-center justify-between">
-              <div className="flex items-center">
-                <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center mr-4">
+            <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+              <div className="flex items-start gap-3 sm:items-center">
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-emerald-100">
                   <CheckCircle className="h-6 w-6 text-green-600" />
                 </div>
                 <div>
-                  <h3 className="text-lg font-semibold text-green-900">Assigned to Dr. {data.assignedPractitioner.name}</h3>
+                  <h2 className="text-lg font-semibold text-emerald-950">Assigned to Dr. {data.assignedPractitioner.name}</h2>
                   <div className="flex items-center text-green-700 text-sm mt-1">
                     <MapPin className="h-4 w-4 mr-1" />
                     {data.assignedPractitioner.practiceLocation?.city}, {data.assignedPractitioner.practiceLocation?.state}
@@ -125,13 +136,14 @@ const PatientDashboard = ({ user, patientProgress, notifications }) => {
                 </div>
               </div>
               <button
-                onClick={() => window.location.href = '/?tab=practitioner-search'}
-                className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors text-sm"
+                type="button"
+                onClick={() => onNavigate?.('practitioner-search')}
+                className="min-h-10 shrink-0 rounded-lg bg-amber-700 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-amber-800"
               >
                 View Details
               </button>
             </div>
-          </div>
+          </section>
         )}
 
         {/* Quick Stats */}
@@ -144,7 +156,7 @@ const PatientDashboard = ({ user, patientProgress, notifications }) => {
               Next Healing Session
             </p>
             <p className="text-xl font-semibold text-amber-900">
-              {data?.nextSession || "Not Scheduled"}
+              {data?.nextSession ? `${new Date(data.nextSession.date).toLocaleDateString()} ${data.nextSession.startTime || ''}` : "Not Scheduled"}
             </p>
           </div>
           <div className="bg-gradient-to-br from-amber-50 to-orange-50 p-6 rounded-xl shadow-md border border-amber-100 relative overflow-hidden group hover:shadow-lg transition-all">
@@ -163,22 +175,31 @@ const PatientDashboard = ({ user, patientProgress, notifications }) => {
               <img src={mandalaBackground} alt="" className="w-full h-full" />
             </div>
             <p className="text-amber-800 mb-2 font-medium">
-              Messages & Updates
+              Unread Messages
             </p>
             <p className="text-xl font-semibold text-amber-900">
-              {data?.notifications?.length || 0}
+              {data?.unreadMessages ?? 0}
             </p>
           </div>
           <div className="bg-gradient-to-br from-amber-50 to-orange-50 p-6 rounded-xl shadow-md border border-amber-100 relative overflow-hidden group hover:shadow-lg transition-all">
             <div className="absolute top-0 right-0 w-16 h-16 opacity-5 group-hover:opacity-10 transition-opacity">
               <img src={mandalaBackground} alt="" className="w-full h-full" />
             </div>
-            <p className="text-amber-800 mb-2 font-medium">Wellness Score</p>
-            <p className="text-xl font-semibold text-amber-900">
-              {data?.wellnessScore || 0}/10
-            </p>
+            <p className="text-amber-800 mb-2 font-medium">Profile Completion</p>
+            <p className="text-xl font-semibold text-amber-900">{data?.profileCompletion ?? 0}%</p>
+            <p className="mt-1 text-xs text-amber-800">Based on key profile details</p>
           </div>
         </div>
+
+        <section className="rounded-xl border border-amber-200 bg-white p-4 shadow-sm sm:p-5">
+          <div className="flex flex-wrap items-center justify-between gap-3"><h2 className="text-lg font-semibold text-amber-950">Upcoming therapy sessions</h2><button type="button" onClick={() => onNavigate?.('therapy-schedule')} className="text-sm font-medium text-amber-800 underline">Open schedule</button></div>
+          {data?.upcomingSessions?.length ? <div className="mt-3 divide-y divide-amber-100">{data.upcomingSessions.map((session) => <div key={session._id} className="flex flex-wrap items-center justify-between gap-2 py-3"><div><p className="font-medium text-amber-950">{session.therapySnapshot?.name || session.sessionName || session.therapyType}</p><p className="text-sm text-stone-600">{new Date(session.date).toLocaleDateString()} · {session.startTime} · {session.durationMins || 60} min</p></div><span className="rounded-full bg-amber-100 px-3 py-1 text-xs capitalize">{session.status}</span></div>)}</div> : <p className="mt-3 rounded-lg bg-amber-50 p-3 text-sm text-stone-700">{data?.activePlan?.status === 'approved' ? 'Your plan is approved, but sessions have not been generated yet.' : data?.activePlan?.status === 'pending-approval' ? 'Your treatment plan is waiting for clinician approval.' : data?.assessmentCount ? 'Your Vaidya will prepare a treatment plan before therapy sessions appear.' : 'Book a consultation to begin your treatment journey.'}</p>}
+        </section>
+
+        <section className="rounded-xl border border-amber-200 bg-white p-4 shadow-sm sm:p-5">
+          <h2 className="text-lg font-semibold text-amber-950">Quick actions</h2>
+          <div className="mt-3 flex flex-wrap gap-2">{[['practitioner-search','Find a Vaidya'],['appointments','Book consultation'],['therapy-schedule','Therapy schedule'],['treatment-progress','Treatment progress'],['profile','Update health profile']].map(([tab,label]) => <button key={tab} type="button" onClick={() => onNavigate?.(tab)} className="rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-sm font-medium text-amber-900 hover:bg-amber-100">{label}</button>)}</div>
+        </section>
 
         {/* Therapy Progress and Wellness */}
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
@@ -198,15 +219,10 @@ const PatientDashboard = ({ user, patientProgress, notifications }) => {
             <p className="text-amber-800 mb-2">
               Overall Progress{" "}
               <span className="font-semibold text-amber-900">
-                {data?.progress || 0}%
+                {data?.progress == null ? 'Not started' : `${data.progress}%`}
               </span>
             </p>
-            <p className="text-amber-700">
-              Next Milestone:{" "}
-              <span className="font-medium">
-                {data?.nextMilestone || "Not Set"}
-              </span>
-            </p>
+            <p className="text-amber-700">Generated therapy sessions: <span className="font-medium">{data?.sessionCounts?.generated ?? 0}</span> · Planned: <span className="font-medium">{data?.sessionCounts?.planned ?? 0}</span> · Cancelled: <span className="font-medium">{data?.sessionCounts?.cancelled ?? 0}</span></p>
           </div>
 
           {/* Dosha Balance & Wellness */}
@@ -215,62 +231,16 @@ const PatientDashboard = ({ user, patientProgress, notifications }) => {
               <img src={herbsBackground} alt="" className="w-full h-full" />
             </div>
             <h3 className="text-xl font-semibold text-amber-900 mb-6">
-              Dosha Balance & Wellness
+              Treatment Plan
             </h3>
-            <div className="space-y-6">
-              <div>
-                <div className="flex justify-between mb-2">
-                  <p className="text-amber-800 font-medium">
-                    Vata (Air & Space)
-                  </p>
-                  <span className="text-amber-900 font-semibold">Balanced</span>
-                </div>
-                <div className="w-full bg-amber-200/30 rounded-full h-3">
-                  <div
-                    className="bg-gradient-to-r from-amber-400 to-orange-400 h-3 rounded-full"
-                    style={{ width: "90%" }}
-                  ></div>
-                </div>
-              </div>
-
-              <div>
-                <div className="flex justify-between mb-2">
-                  <p className="text-amber-800 font-medium">
-                    Pitta (Fire & Water)
-                  </p>
-                  <span className="text-amber-900 font-semibold">
-                    Slightly High
-                  </span>
-                </div>
-                <div className="w-full bg-amber-200/30 rounded-full h-3">
-                  <div
-                    className="bg-gradient-to-r from-amber-400 to-orange-400 h-3 rounded-full"
-                    style={{ width: "80%" }}
-                  ></div>
-                </div>
-              </div>
-
-              <div>
-                <div className="flex justify-between mb-2">
-                  <p className="text-amber-800 font-medium">
-                    Kapha (Earth & Water)
-                  </p>
-                  <span className="text-amber-900 font-semibold">
-                    In Balance
-                  </span>
-                </div>
-                <div className="w-full bg-amber-200/30 rounded-full h-3">
-                  <div
-                    className="bg-gradient-to-r from-amber-400 to-orange-400 h-3 rounded-full"
-                    style={{ width: "85%" }}
-                  ></div>
-                </div>
-              </div>
-            </div>
+            {data?.activePlan ? <><p className="text-amber-800">Status: <span className="font-semibold capitalize">{data.activePlan.status.replace('-', ' ')}</span></p><p className="mt-2 text-sm text-amber-800">{data.activePlan.therapies?.map((therapy) => therapy.therapyType).filter(Boolean).join(' · ') || 'Therapy details are being prepared.'}</p>{data.activePlan.status === 'approved' && !data.sessionCounts?.generated && <p className="mt-2 text-sm text-amber-700">Approved plan · sessions not generated yet.</p>}</> : <p className="text-amber-700">{data?.assessmentCount ? 'Your assessment is recorded. Your Vaidya will prepare your treatment plan.' : 'No assessment is recorded yet. Book a consultation to get started.'}</p>}
           </div>
         </div>
 
         {/* Notifications & Care */}
+        {data?.nextConsultation && <section className="rounded-xl border border-amber-200 bg-white p-4"><h2 className="font-semibold text-amber-950">Upcoming consultation</h2><p className="mt-1 text-sm text-amber-800">{new Date(data.nextConsultation.date).toLocaleDateString()} · {data.nextConsultation.startTime} · {data.nextConsultation.practitioner?.name || 'Vaidya'}</p><button type="button" onClick={() => onNavigate?.('appointments')} className="mt-2 text-sm font-medium text-amber-800 underline">View appointments</button></section>}
+        {data?.sessionCounts?.remainingToGenerate > 0 && <p className="rounded-lg bg-amber-50 p-3 text-sm text-amber-900">Your approved plan has {data.sessionCounts.remainingToGenerate} planned session(s) not yet generated. Contact your Vaidya for scheduling.</p>}
+        {data?.followUps?.length > 0 && <section className="rounded-xl border border-amber-200 bg-white p-4"><h2 className="font-semibold text-amber-950">Next follow-up</h2><p className="mt-1 text-sm text-amber-800">{new Date(data.followUps.find((item) => item.status === 'pending')?.dueAt || data.followUps[0].dueAt).toLocaleDateString()} · {data.followUps.find((item) => item.status === 'pending')?.practitioner?.name || data.followUps[0].practitioner?.name || 'Vaidya'}</p><button type="button" onClick={() => onNavigate?.('follow-ups')} className="mt-2 text-sm font-medium text-amber-800 underline">View follow-ups</button></section>}
         <div className="grid grid-cols-1 gap-4">
           <div className="bg-gradient-to-br from-amber-50 to-orange-50 rounded-xl shadow-sm border border-amber-100 overflow-hidden">
             <div className="relative">

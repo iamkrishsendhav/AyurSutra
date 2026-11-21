@@ -1,11 +1,14 @@
 import React, { useState, useEffect } from "react";
 import { Leaf, Eye, EyeOff, Mail, Lock, ArrowLeft } from "lucide-react";
 import { useToast } from "../../contexts/ToastContext.jsx";
+import authFetch, { apiUrl } from '../../utils/apiClient';
 
 const LoginPage = ({
   onSwitchToSignup,
   onAuthSuccess,
   onBackToLanding,
+  expectedRole = 'patient',
+  onRoleChange,
   prefillEmail = "",
   prefillPassword = "",
 }) => {
@@ -56,27 +59,18 @@ const LoginPage = ({
       return;
     }
 
-    if (formData.password.length < 6) {
-      show({
-        title: "Invalid Password",
-        message: "Password must be at least 6 characters",
-        duration: 4000,
-      });
-      return;
-    }
-
     try {
-      const res = await fetch("http://localhost:5000/api/auth/login", {
+      const res = await authFetch("/api/auth/login", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           email: formData.email,
           password: formData.password,
+          expectedRole,
         }),
       });
 
       const data = await res.json();
-      console.log("Login response:", data);
 
       if (res.ok) {
         show({
@@ -93,7 +87,8 @@ const LoginPage = ({
             _id: data._id,
             name: data.name,
             email: data.email,
-            userType: data.userType, // "patient" or "practitioner"
+                  userType: data.userType,
+            mustChangePassword: Boolean(data.mustChangePassword),
           };
           localStorage.setItem("user", JSON.stringify(userObj));
           onAuthSuccess(userObj);
@@ -123,13 +118,13 @@ const LoginPage = ({
 
   const handleGoogleLogin = () => {
     // Redirect to Google OAuth endpoint
-    window.location.href = "http://localhost:5000/api/auth/google";
+    window.location.href = apiUrl('/api/auth/google');
   };
 
   return (
     <div className="min-h-screen w-full flex relative overflow-hidden bg-gradient-to-br from-ayurveda-chandana/30 via-ayurveda-haldi/20 to-ayurveda-kumkum/20">
       {/* Main background with multiple layers */}
-      <div className="fixed inset-0">
+      <div className="fixed inset-0 pointer-events-none">
         {/* Simple, clean gradient background */}
         <div className="absolute inset-0 bg-gradient-to-br from-[#8B4513]/20 via-[#CD853F]/15 to-[#DEB887]/20 animate-gradient-slow"></div>
 
@@ -215,20 +210,27 @@ const LoginPage = ({
       </div>
 
       {/* Right Side - Login Form */}
-      <div className="w-full lg:w-1/2 flex items-center justify-center p-6 relative">
+      <div className="w-full lg:w-1/2 flex items-center justify-center p-4 relative">
         {/* Login Form */}
-        <div className="w-full max-w-xl bg-[#FDF5E6]/90 backdrop-blur-lg rounded-2xl shadow-[0_8px_32px_rgba(139,69,19,0.15)] p-8 border border-[#DEB887]/30 hover:shadow-[0_8px_32px_rgba(139,69,19,0.25)] transition-all duration-300 relative overflow-hidden">
+        <div className="w-full max-w-xl bg-[#FDF5E6]/90 backdrop-blur-lg rounded-2xl shadow-[0_8px_32px_rgba(139,69,19,0.15)] p-6 border border-[#DEB887]/30 hover:shadow-[0_8px_32px_rgba(139,69,19,0.25)] transition-all duration-300 relative overflow-hidden">
           {/* Gradient border effect - Using traditional Ayurvedic colors */}
           <div className="absolute inset-0 rounded-2xl border-2 border-transparent bg-gradient-to-br from-[#8B4513]/30 via-[#CD853F]/20 to-[#DEB887]/30 -z-10"></div>
 
-          <h2 className="text-2xl font-display text-dosha-kapha mb-8 text-center">
+          {onRoleChange && <div className="mb-4">
+            <p className="mb-2 text-center text-sm font-medium text-amber-900">Choose your AyurSutra portal</p>
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-4" role="group" aria-label="Login portal">
+              {[["patient", "Patient Login"], ["practitioner", "Vaidya Login"], ["receptionist", "Receptionist Login"], ["admin", "Admin Login"]].map(([role, label]) => <button key={role} type="button" onClick={() => onRoleChange(role)} aria-pressed={expectedRole === role} className={`min-h-[var(--ui-control-target)] rounded-lg border px-1.5 py-1.5 text-xs font-medium ${expectedRole === role ? 'border-amber-700 bg-amber-700 text-white' : 'border-amber-200 text-amber-900 hover:bg-amber-50'}`}>{label}</button>)}
+            </div>
+          </div>}
+
+          <h2 className="text-2xl font-display text-dosha-kapha mb-4 text-center">
             Welcome Back
           </h2>
 
           {/* Panchakarma Treatment Icons */}
           <div className="absolute -right-16 -top-16 w-32 h-32 opacity-5 bg-[url('/treatments/basti.svg')] bg-no-repeat bg-contain rotate-12"></div>
           <div className="absolute -left-16 -bottom-16 w-32 h-32 opacity-5 bg-[url('/treatments/nasya.svg')] bg-no-repeat bg-contain -rotate-12"></div>
-          <div className="space-y-6">
+          <div className="space-y-4">
             {/* Email Field */}
             <div className="space-y-2">
               <label className="text-sm font-semibold text-gray-700 tracking-wide">
@@ -242,7 +244,7 @@ const LoginPage = ({
                   value={formData.email}
                   onChange={handleInputChange}
                   onKeyPress={handleKeyPress}
-                  className="w-full pl-10 pr-4 py-3.5 bg-white/70 backdrop-blur-md border-2 border-gray-100 rounded-xl focus:ring-4 focus:ring-ayurveda-kumkum/20 focus:border-ayurveda-kumkum hover:border-ayurveda-kumkum/50 transition-all duration-200 placeholder:text-gray-400 text-gray-700"
+                  className="w-full pl-10 pr-4 py-2.5 sm:py-3 bg-white/70 backdrop-blur-md border-2 border-gray-100 rounded-xl focus:ring-4 focus:ring-ayurveda-kumkum/20 focus:border-ayurveda-kumkum hover:border-ayurveda-kumkum/50 transition-all duration-200 placeholder:text-gray-400 text-gray-700"
                   placeholder="Enter your email"
                   required
                 />
@@ -262,7 +264,7 @@ const LoginPage = ({
                   value={formData.password}
                   onChange={handleInputChange}
                   onKeyPress={handleKeyPress}
-                  className="w-full pl-10 pr-12 py-3.5 bg-white/70 backdrop-blur-md border-2 border-gray-100 rounded-xl focus:ring-4 focus:ring-ayurveda-kumkum/20 focus:border-ayurveda-kumkum hover:border-ayurveda-kumkum/50 transition-all duration-200 placeholder:text-gray-400 text-gray-700"
+                  className="w-full pl-10 pr-12 py-2.5 sm:py-3 bg-white/70 backdrop-blur-md border-2 border-gray-100 rounded-xl focus:ring-4 focus:ring-ayurveda-kumkum/20 focus:border-ayurveda-kumkum hover:border-ayurveda-kumkum/50 transition-all duration-200 placeholder:text-gray-400 text-gray-700"
                   placeholder="Enter your password"
                   required
                 />
@@ -303,7 +305,7 @@ const LoginPage = ({
             {/* Login Button */}
             <button
               onClick={handleLogin}
-              className="w-full relative overflow-hidden bg-gradient-to-r from-[#8B4513] to-[#CD853F] text-[#FDF5E6] px-6 py-4 rounded-xl font-medium group shadow-lg hover:shadow-xl transition-all duration-300"
+              className="w-full relative overflow-hidden bg-gradient-to-r from-[#8B4513] to-[#CD853F] text-[#FDF5E6] px-6 py-3 rounded-xl font-medium group shadow-lg hover:shadow-xl transition-all duration-300"
             >
               <div className="absolute inset-0 bg-gradient-to-r from-[#CD853F] to-[#DEB887] opacity-0 group-hover:opacity-100 transition-opacity duration-300"></div>
               <div className="relative">
@@ -318,7 +320,7 @@ const LoginPage = ({
             </button>
 
             {/* Divider with Panchakarma Elements */}
-            <div className="relative my-8">
+            <div className="relative my-3">
               <div className="absolute inset-0 flex items-center">
                 <div className="w-full h-px bg-gradient-to-r from-transparent via-[#8B4513]/30 to-transparent"></div>
               </div>
@@ -361,7 +363,7 @@ const LoginPage = ({
             </div>
 
             {/* Social Login Options */}
-            <div className="flex justify-center">
+            {expectedRole === 'patient' && <div className="flex justify-center">
               <button
                 type="button"
                 onClick={handleGoogleLogin}
@@ -377,11 +379,11 @@ const LoginPage = ({
                   Continue with Google
                 </span>
               </button>
-            </div>
+            </div>}
           </div>
 
           {/* Sign Up Link with Sanskrit */}
-          <div className="mt-6 text-center">
+          {expectedRole === 'patient' && <div className="mt-6 text-center">
             <div className="flex items-center justify-center space-x-2">
               <span className="text-gray-600 text-base">
                 Don't have an account?
@@ -393,7 +395,7 @@ const LoginPage = ({
                 Sign up here
               </button>
             </div>
-          </div>
+          </div>}
         </div>
       </div>
 

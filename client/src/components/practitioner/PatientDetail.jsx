@@ -1,235 +1,35 @@
-import React, { useState, useEffect } from 'react';
-import { useParams, useNavigate } from 'react-router-dom';
-import { ChevronLeft, Edit3, Save, AlertCircle } from 'lucide-react';
-import WellnessTrend from '../Progress/WellnessTrend';
-import RecoveryMilestones from '../Progress/RecoveryMilestones';
+import React, { useCallback, useEffect, useState } from 'react';
+import { ChevronLeft, CalendarDays, UserRound, Activity } from 'lucide-react';
 import authFetch from '../../utils/apiClient';
+import DoctorPlanPanel from './DoctorPlanPanel';
 
-const PatientDetail = () => {
-  const { patientId } = useParams();
-  const navigate = useNavigate();
-  const [patient, setPatient] = useState(null);
-  const [sessions, setSessions] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [isEditing, setIsEditing] = useState(false);
-  const [notes, setNotes] = useState('');
-  const [recommendations, setRecommendations] = useState('');
-
-  useEffect(() => {
-    fetchPatientDetails();
+const PatientDetail = ({ patientId, onBack }) => {
+  const [patient, setPatient] = useState(null); const [sessions, setSessions] = useState([]); const [plans, setPlans] = useState([]); const [loading, setLoading] = useState(true); const [error, setError] = useState('');
+  const load = useCallback(async () => {
+    setLoading(true); setError('');
+    try {
+      const response = await authFetch(`/api/practitioner/patients/${patientId}`); const data = await response.json();
+      if (!response.ok) throw new Error(data.message || (response.status === 403 ? 'You are not authorized to view this patient.' : 'Unable to load patient details.'));
+      setPatient(data.patient); setSessions(Array.isArray(data.sessions) ? data.sessions : []); setPlans(Array.isArray(data.plans) ? data.plans : []);
+    } catch (e) { setError(e.message); } finally { setLoading(false); }
   }, [patientId]);
-
-  const fetchPatientDetails = async () => {
-    try {
-      let response;
-      try {
-        response = await authFetch(`/api/practitioner/patients/${patientId}`);
-      } catch (err) {
-        console.error('authFetch failed', err);
-        response = null;
-      }
-
-      if (!response || response.status === 401 || response.status === 403) {
-        // try public fallback
-        const fb = await fetch(`/auth/patients/${patientId}`).catch(() => null);
-        const data = fb ? await fb.json().catch(() => null) : null;
-        if (data) {
-          setPatient(data.patient || data);
-          setSessions(data.sessions || []);
-          setNotes((data.patient && data.patient.practitionerNotes) || '');
-          setRecommendations((data.patient && data.patient.recommendations) || '');
-        }
-      } else {
-        const data = await response.json();
-        if (data.success) {
-          setPatient(data.patient);
-          setSessions(data.sessions);
-          setNotes(data.patient.practitionerNotes || '');
-          setRecommendations(data.patient.recommendations || '');
-        }
-      }
-    } catch (error) {
-      console.error('Error fetching patient details:', error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const saveUpdates = async () => {
-    try {
-      let response;
-      try {
-        response = await authFetch(`/api/practitioner/patients/${patientId}/progress`, {
-          method: 'PUT',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            notes,
-            recommendations
-          }),
-        });
-      } catch (err) {
-        console.error('authFetch failed', err);
-        response = null;
-      }
-
-      if (!response || response.status === 401 || response.status === 403) {
-        // try public fallback
-        try {
-          response = await fetch(`/auth/patients/${patientId}/progress`, {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ notes, recommendations })
-          });
-        } catch (err) {
-          console.error('Fallback update failed', err);
-          response = null;
-        }
-      }
-
-      if (response && response.ok) {
-        setIsEditing(false);
-        fetchPatientDetails(); // Refresh data
-      } else {
-        const err = response ? await response.text().catch(() => 'Failed') : 'No response';
-        console.error('Save error:', err);
-      }
-    } catch (error) {
-      console.error('Error updating patient:', error);
-    }
-  };
-
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center h-64">
-        <div className="animate-spin rounded-full h-12 w-12 border-t-2 border-b-2 border-blue-500"></div>
-      </div>
-    );
-  }
-
-  return (
-    <div className="p-6">
-      <div className="flex items-center justify-between mb-6">
-        <button
-          onClick={() => navigate('/practitioner/patients')}
-          className="flex items-center text-gray-600 hover:text-gray-900"
-        >
-          <ChevronLeft className="h-5 w-5 mr-1" />
-          Back to Patient List
-        </button>
-        <button
-          onClick={() => isEditing ? saveUpdates() : setIsEditing(true)}
-          className={`flex items-center px-4 py-2 rounded-lg ${
-            isEditing 
-              ? 'bg-green-600 text-white hover:bg-green-700' 
-              : 'bg-blue-600 text-white hover:bg-blue-700'
-          }`}
-        >
-          {isEditing ? (
-            <>
-              <Save className="h-5 w-5 mr-2" />
-              Save Changes
-            </>
-          ) : (
-            <>
-              <Edit3 className="h-5 w-5 mr-2" />
-              Edit Patient Details
-            </>
-          )}
-        </button>
-      </div>
-
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Patient Info Card */}
-        <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-          <div className="flex items-center space-x-4 mb-6">
-            <div className="h-16 w-16 rounded-full bg-gray-200 flex items-center justify-center">
-              <span className="text-2xl font-medium text-gray-600">
-                {patient?.name?.charAt(0)}
-              </span>
-            </div>
-            <div>
-              <h2 className="text-xl font-bold text-gray-900">{patient?.name}</h2>
-              <p className="text-gray-500">{patient?.email}</p>
-            </div>
-          </div>
-
-          <div className="space-y-4">
-            <div>
-              <h3 className="text-sm font-medium text-gray-500">Current Stage</h3>
-              <p className="mt-1 text-gray-900">{patient?.currentStage || 'Initial Assessment'}</p>
-            </div>
-            <div>
-              <h3 className="text-sm font-medium text-gray-500">Treatment Start Date</h3>
-              <p className="mt-1 text-gray-900">
-                {new Date(patient?.treatmentStartDate || Date.now()).toLocaleDateString()}
-              </p>
-            </div>
-            <div>
-              <h3 className="text-sm font-medium text-gray-500">Phone</h3>
-              <p className="mt-1 text-gray-900">{patient?.phone || 'Not provided'}</p>
-            </div>
-          </div>
-        </div>
-
-        {/* Progress Section */}
-        <div className="lg:col-span-2 space-y-6">
-          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-            <h3 className="text-lg font-semibold mb-4">Treatment Progress</h3>
-            <WellnessTrend feedbackData={sessions.map(s => ({
-              session: new Date(s.date).toLocaleDateString(),
-              wellness: s.feedback?.wellness || 0,
-              energy: s.feedback?.energy || 0,
-              sleep: s.feedback?.sleep || 0
-            }))} />
-          </div>
-
-          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-            <h3 className="text-lg font-semibold mb-4">Practitioner Notes</h3>
-            {isEditing ? (
-              <textarea
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                className="w-full h-32 p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                placeholder="Add your notes about the patient's progress..."
-              />
-            ) : (
-              <p className="text-gray-600">
-                {notes || 'No notes added yet.'}
-              </p>
-            )}
-          </div>
-
-          <div className="bg-white rounded-lg shadow-sm border border-gray-200 p-6">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold">Recommendations</h3>
-              <div className="flex items-center text-yellow-600">
-                <AlertCircle className="h-5 w-5 mr-2" />
-                <span className="text-sm">Will be visible to patient</span>
-              </div>
-            </div>
-            {isEditing ? (
-              <textarea
-                value={recommendations}
-                onChange={(e) => setRecommendations(e.target.value)}
-                className="w-full h-32 p-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500"
-                placeholder="Add recommendations for the patient..."
-              />
-            ) : (
-              <p className="text-gray-600">
-                {recommendations || 'No recommendations added yet.'}
-              </p>
-            )}
-          </div>
-        </div>
-      </div>
-
-      <div className="mt-6">
-        <RecoveryMilestones sessionData={sessions} />
-      </div>
-    </div>
-  );
+  useEffect(() => { load(); }, [load]);
+  if (loading) return <p role="status" className="p-6 text-amber-900">Loading assigned patient record…</p>;
+  if (error || !patient) return <main className="space-y-4 p-5"><button type="button" onClick={onBack} className="inline-flex items-center text-amber-900"><ChevronLeft className="mr-1 h-5 w-5"/>Back to patient list</button><p role="alert" className="rounded-lg bg-red-50 p-4 text-red-800">{error || 'Patient record not found.'}<button type="button" onClick={load} className="ml-3 underline">Retry</button></p></main>;
+  const history = patient.medicalHistory || {}; const completed = sessions.filter((item) => item.status === 'completed').length;
+  const upcoming = sessions.filter((item) => ['scheduled', 'confirmed'].includes(item.status) && new Date(item.date) >= new Date(new Date().setHours(0, 0, 0, 0))).sort((a, b) => new Date(a.date) - new Date(b.date))[0];
+  const dob = patient.personalDetails?.dateOfBirth ? new Date(patient.personalDetails.dateOfBirth) : null;
+  const age = dob ? Math.max(0, Math.floor((Date.now() - dob.getTime()) / 31557600000)) : null;
+  const listFields = [['Conditions', history.conditions], ['Allergies', history.allergies], ['Current medications', history.medications], ['Previous therapies', history.previousTreatments], ['Previous surgeries', history.previousSurgeries], ['Primary concerns', history.primaryConcerns], ['Patient goals', history.treatmentGoals], ['Patient-reported symptoms', history.patientReportedSymptoms]];
+  const activePlan = plans.find((item) => ['approved', 'pending-approval', 'draft'].includes(item.status));
+  return <main className="mx-auto max-w-6xl space-y-5 p-4 text-amber-950 sm:p-6">
+    <button type="button" onClick={onBack} className="inline-flex items-center text-sm text-amber-800 hover:text-amber-950"><ChevronLeft className="mr-1 h-5 w-5"/>Back to patient list</button>
+    <header className="flex flex-wrap items-center gap-4 rounded-xl border border-amber-200 bg-white p-5"><div className="flex h-14 w-14 items-center justify-center overflow-hidden rounded-full bg-amber-100">{patient.profileImageUrl ? <img src={patient.profileImageUrl} alt="" className="h-full w-full object-cover"/> : <UserRound className="h-7 w-7 text-amber-800"/>}</div><div className="min-w-0 flex-1"><h1 className="text-2xl font-semibold">{patient.name}</h1><p className="text-sm text-stone-600">{patient.email}{patient.phone ? ` · ${patient.phone}` : ''}</p><p className="mt-1 text-xs capitalize text-stone-600">{[age !== null ? `${age} years` : null, patient.personalDetails?.gender?.replaceAll('_', ' '), patient.personalDetails?.bloodGroup ? `Blood group ${patient.personalDetails.bloodGroup}` : null].filter(Boolean).join(' · ') || 'Demographic details not provided'}</p></div></header>
+    <section className="grid gap-3 sm:grid-cols-3"><Summary icon={Activity} label="Latest treatment plan" value={activePlan?.title || activePlan?.status || 'No plan'} detail={activePlan ? `${activePlan.status} · ${new Date(activePlan.createdAt).toLocaleDateString()}` : plans.length ? `${plans.length} historical plan(s)` : 'No plan recorded'}/><Summary icon={CalendarDays} label="Next session" value={upcoming ? new Date(upcoming.date).toLocaleDateString() : 'Not scheduled'} detail={upcoming ? `${upcoming.startTime || ''} · ${upcoming.sessionName || upcoming.therapyType}` : 'No upcoming session'} /><Summary icon={Activity} label="Session history" value={`${completed} completed`} detail={`${sessions.filter((item) => item.status !== 'cancelled').length} non-cancelled recorded`}/></section>
+    <section className="rounded-xl border border-amber-200 bg-[#FDF7E9] p-5"><h2 className="text-lg font-semibold">Patient-entered health profile</h2><p className="mt-1 text-xs text-stone-600">Information below was provided in the patient profile; clinical assessment records are listed separately.</p><div className="mt-4 grid gap-3 sm:grid-cols-2">{listFields.map(([label, values]) => <div key={label} className="rounded-lg bg-white/75 p-3"><h3 className="text-sm font-medium">{label}</h3><p className="mt-1 text-sm text-stone-700">{Array.isArray(values) && values.length ? values.join(', ') : 'None recorded'}</p></div>)}<div className="rounded-lg bg-white/75 p-3"><h3 className="text-sm font-medium">Previous Panchakarma</h3><p className="mt-1 text-sm text-stone-700">{history.previousPanchakarma || 'Not recorded'}</p></div><div className="rounded-lg bg-white/75 p-3"><h3 className="text-sm font-medium">Lifestyle</h3><p className="mt-1 text-sm text-stone-700">{Object.entries(history.lifestyle || {}).filter(([, value]) => value).map(([key, value]) => `${key.replace(/[A-Z]/g, (letter) => ` ${letter.toLowerCase()}`)}: ${value}`).join(' · ') || 'Not recorded'}</p></div><div className="rounded-lg bg-white/75 p-3"><h3 className="text-sm font-medium">Health notes</h3><p className="mt-1 whitespace-pre-wrap text-sm text-stone-700">{history.healthNotes || 'None recorded'}</p></div><div className="rounded-lg bg-white/75 p-3"><h3 className="text-sm font-medium">Emergency contact</h3><p className="mt-1 text-sm text-stone-700">{patient.emergencyContact?.name ? `${patient.emergencyContact.name} · ${patient.emergencyContact.phone || 'No phone'} · ${patient.emergencyContact.relationship || 'Relationship not given'}` : 'Not provided'}</p></div></div></section>
+    <section className="rounded-xl border border-amber-200 bg-white p-5"><h2 className="text-lg font-semibold">Therapy session history</h2>{sessions.length ? <ol className="mt-3 space-y-2">{sessions.map((item) => <li key={item._id} className="flex flex-wrap justify-between gap-2 rounded-lg border border-amber-100 bg-[#fffdf8] p-3"><div><p className="font-medium">{item.sessionName || item.therapyType}</p><p className="text-xs text-stone-600">{item.therapyType}{item.phase ? ` · ${item.phase}` : ''} · {item.durationMins || 60} min</p></div><p className="text-sm text-amber-900">{new Date(item.date).toLocaleDateString()} · {item.startTime || ''} · <span className="capitalize">{item.status}</span></p></li>)}</ol> : <p className="mt-3 text-sm text-stone-600">No sessions are recorded for this assigned patient.</p>}</section>
+    <DoctorPlanPanel patientId={patientId}/>
+  </main>;
 };
-
+function Summary({ icon: Icon, label, value, detail }) { return <div className="rounded-xl border border-amber-200 bg-white p-4"><div className="flex items-center gap-2 text-xs text-stone-600"><Icon className="h-4 w-4 text-amber-700"/>{label}</div><p className="mt-2 font-semibold capitalize">{value}</p><p className="mt-1 text-xs text-stone-600">{detail}</p></div>; }
 export default PatientDetail;

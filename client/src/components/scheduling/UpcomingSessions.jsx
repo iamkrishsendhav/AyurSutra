@@ -1,5 +1,6 @@
 import React, { useState } from "react";
 import { Clock, Edit3, Droplets, Trash2 } from "lucide-react";
+import { authFetch } from "../../utils/apiClient";
 
 const UpcomingSessions = ({ therapySessions, userType, userId, onSessionUpdated }) => {
   const sessionsList = Array.isArray(therapySessions) ? therapySessions : [];
@@ -25,7 +26,7 @@ const UpcomingSessions = ({ therapySessions, userType, userId, onSessionUpdated 
       return;
     }
     try {
-      const res = await fetch(`http://localhost:5000/api/sessions/edit/${editSession._id || editSession.id}`,
+      const res = await authFetch(`/sessions/${editSession._id || editSession.id}`,
         {
           method: "PUT",
           headers: { "Content-Type": "application/json" },
@@ -57,8 +58,8 @@ const UpcomingSessions = ({ therapySessions, userType, userId, onSessionUpdated 
 
   const handleDeleteConfirm = async () => {
     try {
-      const res = await fetch(
-        `http://localhost:5000/api/sessions/delete/${editSession._id || editSession.id}?userId=${userId}&userType=${userType}`,
+      const res = await authFetch(
+        `/sessions/delete/${editSession._id || editSession.id}`,
         { method: "DELETE" }
       );
       const data = await res.json();

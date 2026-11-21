@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect } from "react";
 import axios from "axios";
+import { apiUrl } from "../../utils/apiClient";
 import { MessageCircle, X, Send, Sparkles } from "lucide-react";
 
 // Simple markdown renderer
@@ -12,7 +13,7 @@ const MarkdownRenderer = ({ children }) => {
       .replace(/### (.*)/g, '<h3 class="font-bold text-base mb-1">$1</h3>')
       .replace(/## (.*)/g, '<h2 class="font-bold text-lg mb-2">$1</h2>')
       .replace(/# (.*)/g, '<h1 class="font-bold text-xl mb-2">$1</h1>')
-      .replace(/^\- (.*)/gm, '<li class="ml-4">• $1</li>')
+      .replace(/^- (.*)/gm, '<li class="ml-4">• $1</li>')
       .replace(/^\d+\. (.*)/gm, '<li class="ml-4">$1</li>');
   };
 
@@ -53,7 +54,7 @@ const ChatbotWidget = ({ user }) => {
     setIsTyping(true);
     
     try {
-      const res = await axios.post("http://localhost:5000/api/chat", {
+      const res = await axios.post(apiUrl("/api/chat"), {
         userId: user?._id,
         message: messageText
       });

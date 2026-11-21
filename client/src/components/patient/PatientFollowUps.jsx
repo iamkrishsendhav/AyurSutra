@@ -1,0 +1,11 @@
+import React, { useEffect, useState } from 'react';
+import authFetch from '../../utils/apiClient';
+
+const PatientFollowUps = () => {
+  const [items, setItems] = useState([]); const [loading, setLoading] = useState(true); const [error, setError] = useState('');
+  useEffect(() => { let active = true; authFetch('/api/follow-ups').then(async (response) => { const body = await response.json(); if (!response.ok) throw new Error(body.message || 'Unable to load follow-ups'); if (active) setItems(body.followUps || []); }).catch((e) => { if (active) setError(e.message); }).finally(() => { if (active) setLoading(false); }); return () => { active = false; }; }, []);
+  const pending = items.filter((item) => item.status === 'pending'); const completed = items.filter((item) => item.status === 'completed');
+  const group = (title, records, empty) => <section className="rounded-xl border border-amber-200 bg-white p-5"><h2 className="font-semibold">{title}</h2>{records.length ? <div className="mt-3 space-y-2">{records.map((item) => <article key={item._id} className="rounded-lg bg-amber-50 p-4"><div className="flex flex-wrap justify-between gap-2"><p className="font-medium">{new Date(item.dueAt).toLocaleDateString()}</p><span className="text-sm capitalize">{item.status}</span></div><p className="mt-1 text-sm text-stone-700">{item.notes || 'No additional instructions recorded.'}</p><p className="mt-1 text-xs text-stone-600">Vaidya {item.practitioner?.name || 'not listed'}{item.session ? ` · ${item.session.sessionName || item.session.therapyType}` : ''}</p></article>)}</div> : <p className="mt-2 rounded-lg bg-stone-50 p-3 text-sm text-stone-600">{empty}</p>}</section>;
+  return <main className="mx-auto max-w-5xl space-y-5 px-4 py-6 text-amber-950 sm:px-6"><header><h1 className="text-2xl font-semibold">Follow-ups</h1><p className="mt-1 text-sm text-amber-800">Follow-up instructions and dates recorded by your care team.</p></header>{error && <p role="alert" className="rounded bg-red-50 p-3 text-red-800">{error}</p>}{loading ? <p role="status">Loading follow-ups…</p> : <>{group('Upcoming and pending', pending, 'No pending follow-ups are scheduled.')}{group('Completed', completed, 'No follow-ups have been completed yet.')}</>}</main>;
+};
+export default PatientFollowUps;

@@ -2,13 +2,14 @@ const express = require("express");
 const router = express.Router();
 const User = require("../models/User");
 const auth = require("../middleware/auth");
+const { notifyUsers } = require('../utils/notifications');
 
 // ======================
 // Search Practitioners
 // ======================
 router.get("/search", auth, async (req, res) => {
   try {
-    const { city, state, pincode, practiceArea, maxDistance } = req.query;
+    const { city, state, pincode, practiceArea, maxDistance, q } = req.query;
     const user = await User.findById(req.user._id);
 
     // Allow both patients and practitioners (and admins if present) to search for practitioners.
@@ -41,45 +42,51 @@ router.get("/search", auth, async (req, res) => {
 
     if (requireVerified) query.verificationStatus = 'verified';
     if (requireAvailable) query.availableForNewPatients = true;
+    query.professionalStatus = { $ne: 'inactive' };
+    query.accountStatus = { $ne: 'suspended' };
+    const andFilters = [];
+    const safeRegex = (value) => new RegExp(String(value).trim().slice(0, 80).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'i');
+    for (const [label, value] of [['city', city], ['state', state], ['postal code', pincode], ['specialization', practiceArea], ['search', q]]) {
+      if (value !== undefined && (typeof value !== 'string' || value.length > 80)) return res.status(400).json({ success: false, message: `Invalid ${label} filter` });
+    }
+    if (q?.trim()) {
+      const expression = safeRegex(q);
+      andFilters.push({ $or: [{ name: expression }, { practiceAreas: expression }, { qualifications: expression }, { bio: expression }] });
+    }
 
     // Add location filters. Match both practiceLocation.* and the user's address.* fields
     // to handle cases where practitioners filled address.city instead of practiceLocation.city
     if (city) {
-      query['$or'] = query['$or'] || [];
-      query['$or'].push({ 'practiceLocation.city': new RegExp(city, 'i') });
-      query['$or'].push({ 'address.city': new RegExp(city, 'i') });
+      const expression = safeRegex(city);
+      andFilters.push({ $or: [{ 'practiceLocation.city': expression }, { 'address.city': expression }] });
     }
     if (state) {
-      query['$or'] = query['$or'] || [];
-      query['$or'].push({ 'practiceLocation.state': new RegExp(state, 'i') });
-      query['$or'].push({ 'address.state': new RegExp(state, 'i') });
+      const expression = safeRegex(state);
+      andFilters.push({ $or: [{ 'practiceLocation.state': expression }, { 'address.state': expression }] });
     }
     if (pincode) {
-      query['$or'] = query['$or'] || [];
-      query['$or'].push({ 'practiceLocation.pincode': pincode });
-      query['$or'].push({ 'address.pincode': pincode });
+      andFilters.push({ $or: [{ 'practiceLocation.pincode': pincode }, { 'address.pincode': pincode }] });
     }
     if (practiceArea) {
-      query['practiceAreas'] = { $in: [new RegExp(practiceArea, 'i')] };
+      const expression = safeRegex(practiceArea);
+      andFilters.push({ $or: [{ practiceAreas: expression }, { qualifications: expression }] });
     }
+    if (andFilters.length) query.$and = andFilters;
 
     // Find practitioners
     const practitioners = await User.find(query)
-      .select('name email practiceLocation practiceAreas consultationFee bio experience verificationStatus')
-      .sort({ experience: -1, name: 1 });
+      .select('name email practiceLocation practiceAreas qualifications profileImageUrl availabilitySchedule consultationFee bio experience verificationStatus availableForNewPatients professionalStatus')
+      .sort({ experience: -1, name: 1 }).limit(100);
 
     // Debugging: include debugMatches array when requested by practitioners/admins, and always log constructed query
     let debugMatches = undefined;
-    console.log('Practitioner search - requester:', user.email || user._id, 'queryParams:', req.query, 'constructedQuery:', JSON.stringify(query));
     if (includeUnverified && ['practitioner', 'admin'].includes(user.userType)) {
       try {
         debugMatches = practitioners.map(p => ({ _id: p._id, name: p.name, city: p.practiceLocation?.city, state: p.practiceLocation?.state, verified: p.verificationStatus }));
-        console.log('Practitioner search debug - matches:', debugMatches);
+        // Restricted diagnostic response is only available to staff callers.
       } catch (e) {
         console.error('Error building debugMatches:', e);
       }
-    } else {
-      console.log('Practitioner search - count:', practitioners.length);
     }
 
     const resp = {
@@ -120,7 +127,8 @@ router.get("/:practitionerId", auth, async (req, res) => {
       _id: practitionerId,
       userType: 'practitioner',
       verificationStatus: 'verified'
-    }).select('name email practiceLocation practiceAreas consultationFee bio experience verificationStatus');
+      , accountStatus: { $ne: 'suspended' }, professionalStatus: { $ne: 'inactive' }, availableForNewPatients: true
+    }).select('name email practiceLocation practiceAreas qualifications profileImageUrl availabilitySchedule consultationFee bio experience verificationStatus');
 
     if (!practitioner) {
       return res.status(404).json({ 
@@ -184,6 +192,7 @@ router.post("/assign", auth, async (req, res) => {
     // Assign patient to practitioner
     user.assignedPractitioner = practitionerId;
     await user.save();
+    await notifyUsers([user._id, practitioner._id], 'patient-assigned', 'Practitioner assignment updated', 'A patient has been assigned to your care team.', { dedupeKey: `patient-assigned:${user._id}:${practitioner._id}` });
 
     res.json({
       success: true,

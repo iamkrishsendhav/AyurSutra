@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import axios from 'axios';
+import authFetch from '../../utils/apiClient';
 
 const WhatsAppTester = ({ user }) => {
   const [email, setEmail] = useState('');
@@ -9,10 +9,12 @@ const WhatsAppTester = ({ user }) => {
   const sendTest = async () => {
     try {
       setResult({ loading: true });
-      const res = await axios.post('http://localhost:5000/admin/send-test-whatsapp', { email, message });
-      setResult({ success: true, res: res.data });
+      const res = await authFetch('/admin/send-test-whatsapp', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, message }) });
+      const body = await res.json();
+      if (!res.ok) throw new Error(body.msg || 'Unable to send WhatsApp test');
+      setResult({ success: true, res: body });
     } catch (err) {
-      setResult({ success: false, error: err.response?.data || err.message });
+      setResult({ success: false, error: err.message });
     }
   };
 

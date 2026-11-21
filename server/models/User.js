@@ -44,7 +44,7 @@ const UserSchema = new mongoose.Schema(
     },
     userType: {
       type: String,
-      enum: ["patient", "practitioner", "admin"],
+      enum: ["patient", "practitioner", "receptionist", "admin"],
       default: "patient",
     },
     assignedPractitioner: {
@@ -57,6 +57,13 @@ const UserSchema = new mongoose.Schema(
       enum: ["active", "completed", "pending", "inactive"],
       default: "pending",
     },
+    accountStatus: { type: String, enum: ['active', 'suspended'], default: 'active', index: true },
+    mustChangePassword: { type: Boolean, default: false },
+    accountStatusHistory: [{
+      status: { type: String, enum: ['active', 'suspended'], required: true },
+      changedAt: { type: Date, default: Date.now },
+      changedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true },
+    }],
     currentStage: {
       type: String,
       enum: [
@@ -119,6 +126,19 @@ const UserSchema = new mongoose.Schema(
       medications: [String],
       allergies: [String],
       previousTreatments: [String],
+      previousSurgeries: [String],
+      primaryConcerns: [String],
+      treatmentGoals: [String],
+      previousPanchakarma: { type: String, trim: true, maxlength: 1000 },
+      patientReportedSymptoms: [String],
+      lifestyle: {
+        dietPreference: { type: String, trim: true, maxlength: 100 },
+        activityLevel: { type: String, trim: true, maxlength: 100 },
+        sleepPattern: { type: String, trim: true, maxlength: 300 },
+        waterIntake: { type: String, trim: true, maxlength: 100 },
+        notes: { type: String, trim: true, maxlength: 2000 },
+      },
+      healthNotes: { type: String, trim: true, maxlength: 5000 },
     },
     address: {
       street: String,
@@ -185,6 +205,15 @@ const UserSchema = new mongoose.Schema(
       },
     },
     practiceAreas: [String], // e.g., ['Vamana', 'Virechana', 'Basti']
+    qualifications: [String],
+    profileImageUrl: { type: String, trim: true, maxlength: 2048 },
+    availabilitySchedule: [{
+      dayOfWeek: { type: String, enum: ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday'] },
+      startTime: { type: String, match: /^([01]\d|2[0-3]):[0-5]\d$/ },
+      endTime: { type: String, match: /^([01]\d|2[0-3]):[0-5]\d$/ },
+      isAvailable: { type: Boolean, default: true },
+    }],
+    professionalStatus: { type: String, enum: ['active', 'inactive'], default: 'active', index: true },
     consultationFee: {
       type: Number,
       default: 0,
@@ -197,6 +226,15 @@ const UserSchema = new mongoose.Schema(
     experience: {
       type: Number, // years of experience
       default: 0,
+    },
+    employeeId: { type: String, trim: true, maxlength: 40 },
+    joiningDate: { type: Date },
+    notificationPreferences: {
+      inApp: { type: Boolean, default: true },
+      categories: { type: Map, of: Boolean, default: {} },
+      sessionReminders: { type: Boolean, default: true },
+      followUpReminders: { type: Boolean, default: true },
+      email: { type: Boolean, default: false },
     },
   },
   {

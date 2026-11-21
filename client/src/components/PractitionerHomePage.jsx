@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from "react";
 import axios from "axios";
+import { apiUrl, authHeaders } from "../utils/apiClient";
 // ChatPanel removed from practitioner dashboard; moved to Notifications & Care page
 import NotificationsPanel from './NotificationsPanel';
 import PractitionerProgress from './PractitionerProgress';
@@ -10,7 +11,7 @@ const PractitionerHomePage = ({ user }) => {
   useEffect(() => {
     if (user?._id) {
       axios
-        .get(`http://localhost:5000/api/dashboard/practitioner/${user._id}`)
+        .get(apiUrl(`/api/dashboard/practitioner/${user._id}`), { headers: authHeaders() })
         .then((res) => setData(res.data))
         .catch((err) =>
           console.error("Error fetching practitioner dashboard:", err)
@@ -27,7 +28,7 @@ const PractitionerHomePage = ({ user }) => {
         <h2 className="text-xl font-semibold">
           Welcome back, Dr. {user?.name || "Practitioner"} 👋
         </h2>
-        <p className="text-sm">You have {data.upcomingPatients.length} upcoming sessions.</p>
+        <p className="text-sm">You have {data.upcomingSessions.length} upcoming sessions.</p>
       </div>
 
       {/* Quick Stats */}

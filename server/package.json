@@ -7,7 +7,9 @@
     "start": "node server.js",
     "server": "nodemon server.js",
     "dev": "nodemon server.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "node --test",
+    "test:workflow": "node tests/workflowIntegration.js",
+    "create-admin": "node scripts/create_admin.js"
   },
   "keywords": [],
   "author": "",
@@ -17,6 +19,7 @@
     "ayursutra-project": "file:..",
     "bcryptjs": "^3.0.2",
     "config": "^4.1.1",
+    "connect-mongo": "^6.0.0",
     "cors": "^2.8.5",
     "dotenv": "^17.2.2",
     "express": "^5.1.0",
@@ -25,7 +28,7 @@
     "mongoose": "^8.18.0",
     "node-cron": "^4.2.1",
     "node-fetch": "^3.3.2",
-    "nodemailer": "^6.9.4",
+    "nodemailer": "^10.6.1",
     "passport": "^0.7.0",
     "passport-google-oauth20": "^2.0.0",
     "twilio": "^5.9.0"

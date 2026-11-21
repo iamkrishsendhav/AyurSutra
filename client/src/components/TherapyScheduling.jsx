@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import axios from "axios";
+import { apiUrl, authHeaders } from "../utils/apiClient";
 import DatePicker from "react-datepicker";
 import "react-datepicker/dist/react-datepicker.css";
 import { useToast } from "../contexts/ToastContext.jsx";
@@ -67,18 +68,10 @@ const TherapyScheduling = ({ userRole, user }) => {
 
     try {
       const formattedDate = editDate.toISOString().split("T")[0];
-      await axios.put(`http://localhost:5000/sessions/${editingSession._id}`, {
+      await axios.put(apiUrl(`/sessions/${editingSession._id}`), {
         date: formattedDate,
         startTime: editTime,
-        userId: user.email,
-        userType: userRole,
-        role: user.role || "patient",
-        status: "scheduled",
-        // Preserve existing session data
-        sessionName: editingSession.sessionName,
-        phase: editingSession.phase,
-        therapyType: editingSession.therapyType,
-      });
+      }, { headers: authHeaders() });
 
       await fetchSessions();
       setEditingSession(null);
@@ -116,20 +109,10 @@ const TherapyScheduling = ({ userRole, user }) => {
     try {
       console.log("Sending cancel request with status:", "cancelled");
       await axios.put(
-        `http://localhost:5000/sessions/${cancellingSession._id}`,
+        apiUrl(`/sessions/${cancellingSession._id}`),
         {
           status: "cancelled",
-          userId: user.email,
-          userType: userRole,
-          role: user.role || "patient",
-          // Preserve existing session data without modifying it
-          sessionName: cancellingSession.sessionName,
-          phase: cancellingSession.phase,
-          therapyType: cancellingSession.therapyType,
-          // Keep the original date and time
-          date: new Date(cancellingSession.date).toISOString().split("T")[0],
-          startTime: cancellingSession.startTime,
-        }
+        }, { headers: authHeaders() }
       );
 
       await fetchSessions();
@@ -151,8 +134,8 @@ const TherapyScheduling = ({ userRole, user }) => {
   const fetchSessions = async () => {
     if (!user || !user.email) return;
     try {
-      const res = await axios.get("http://localhost:5000/sessions", {
-        params: { userId: user.email, role: userRole },
+      const res = await axios.get(apiUrl("/sessions"), {
+        params: { userId: user.email, role: userRole }, headers: authHeaders(),
       });
       setSessions(Array.isArray(res.data) ? res.data : []);
     } catch (err) {
@@ -177,12 +160,12 @@ const TherapyScheduling = ({ userRole, user }) => {
     }
     setLoading(true);
     try {
-      await axios.post("http://localhost:5000/sessions", {
+      await axios.post(apiUrl("/sessions"), {
         patientId: user.email,
         therapyType,
         startDate: startDate.toISOString().split("T")[0],
         status: "scheduled", // Explicitly set lowercase status
-      });
+      }, { headers: authHeaders() });
       show({
         title: "Success",
         message: "Therapy schedule generated successfully!",
@@ -218,101 +201,7 @@ const TherapyScheduling = ({ userRole, user }) => {
       </div>
 
       {/* -------------------- Generate Schedule -------------------- */}
-      {userRole === "patient" && (
-        <div className="mb-12 relative">
-          <div className="flex items-center mb-6">
-            <div className="w-12 h-12 bg-primary-100 rounded-full flex items-center justify-center mr-4">
-              <Calendar className="w-6 h-6 text-primary-600" />
-            </div>
-            <h2 className="text-2xl font-decorative text-amber-900">
-              Plan Your Panchakarma Journey
-            </h2>
-          </div>
-
-          <div className="bg-white/40 backdrop-blur-sm p-6 rounded-xl border border-amber-100 relative overflow-hidden">
-            <div className="absolute top-0 right-0 w-32 h-32 opacity-5">
-              <img src={herbsPattern} alt="" className="w-full h-full" />
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              <div className="relative">
-                <label className="block text-sm font-medium text-amber-800 mb-2">
-                  Select Therapy Type
-                </label>
-                <select
-                  value={therapyType}
-                  onChange={(e) => setTherapyType(e.target.value)}
-                  className="w-full bg-white border border-amber-200 text-amber-900 rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent transition-all"
-                >
-                  {therapyOptions.map((t) => (
-                    <option key={t} value={t}>
-                      {t}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="relative">
-                <label className="block text-sm font-medium text-amber-800 mb-2">
-                  Choose Start Date
-                </label>
-                <DatePicker
-                  selected={startDate}
-                  onChange={(d) => setStartDate(d)}
-                  dateFormat="yyyy-MM-dd"
-                  className="w-full bg-white border border-amber-200 text-amber-900 rounded-lg p-3 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:border-transparent transition-all"
-                  withPortal
-                  portalId="date-picker-portal"
-                  popperProps={{
-                    positionFixed: true,
-                    strategy: "fixed",
-                  }}
-                  popperClassName="react-datepicker-popper-custom"
-                />
-              </div>
-
-              <button
-                onClick={handleGenerateSchedule}
-                disabled={loading}
-                className="h-[calc(100%-8px)] mt-8 bg-gradient-to-r from-primary-500 to-primary-600 text-white rounded-lg px-6 py-3 hover:from-primary-600 hover:to-primary-700 focus:outline-none focus:ring-2 focus:ring-primary-500 focus:ring-offset-2 transition-all transform hover:-translate-y-0.5 active:translate-y-0 disabled:opacity-70 disabled:cursor-not-allowed"
-              >
-                {loading ? (
-                  <span className="flex items-center justify-center">
-                    <svg
-                      className="animate-spin -ml-1 mr-3 h-5 w-5 text-white"
-                      xmlns="http://www.w3.org/2000/svg"
-                      fill="none"
-                      viewBox="0 0 24 24"
-                    >
-                      <circle
-                        className="opacity-25"
-                        cx="12"
-                        cy="12"
-                        r="10"
-                        stroke="currentColor"
-                        strokeWidth="4"
-                      ></circle>
-                      <path
-                        className="opacity-75"
-                        fill="currentColor"
-                        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
-                      ></path>
-                    </svg>
-                    Generating...
-                  </span>
-                ) : (
-                  <span className="flex items-center justify-center">
-                    <Sun className="w-5 h-5 mr-2" />
-                    Generate Schedule
-                  </span>
-                )}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {/* -------------------- My Sessions -------------------- */}
+      {userRole === "patient" && <div className="mb-8 rounded-xl border border-amber-100 bg-amber-50 p-4 text-amber-900">Treatment sessions must be scheduled by your assigned practitioner after assessment. Contact your practitioner to request or change your plan.</div>}`r`n`r`n      {/* -------------------- My Sessions -------------------- */}
       <div className="relative">
         <div className="flex items-center mb-6">
           <div className="w-12 h-12 bg-amber-100 rounded-full flex items-center justify-center mr-4">

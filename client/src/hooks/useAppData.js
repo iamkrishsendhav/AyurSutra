@@ -1,23 +1,7 @@
 import { useState } from "react";
 
 export const useAppData = () => {
-  const [notifications, setNotifications] = useState([
-    {
-      id: 1,
-      type: "pre",
-      title: "Abhyanga Session Tomorrow",
-      message:
-        "Please fast for 2 hours before your session. Wear comfortable clothing.",
-      time: "2 hours ago",
-    },
-    {
-      id: 2,
-      type: "post",
-      title: "Post-Therapy Care",
-      message: "Avoid cold foods and drinks for the next 24 hours. Rest well.",
-      time: "1 day ago",
-    },
-  ]);
+  const [notifications, setNotifications] = useState([]);
 
   const [therapySessions] = useState([
     {
