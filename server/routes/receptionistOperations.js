@@ -4,12 +4,14 @@ const mongoose = require('mongoose');
 const auth = require('../middleware/auth');
 const User = require('../models/User');
 const TherapySession = require('../models/TherapySession');
+const TreatmentPlan = require('../models/TreatmentPlan');
 const { overlaps } = require('../utils/sessionTime');
 const { acquireScheduleLocks } = require('../utils/scheduleLocks');
 const { validateClinicSlot } = require('../utils/clinicScheduling');
 const { notifyUsers, notifyReceptionists } = require('../utils/notifications');
 const Notification = require('../models/Notification');
 const { isValidUserPassword } = require('../utils/passwordPolicy');
+const { practitionerCoversTime, practitionerHasSkills, validScheduleDate } = require('../utils/receptionTherapyScheduling');
 
 const router = express.Router();
 router.use(auth, (req, res, next) => req.user.userType === 'receptionist' ? next() : res.status(403).json({ message: 'Receptionist access required' }));
@@ -91,6 +93,143 @@ router.get('/practitioners', async (_req, res) => {
     const practitioners = await User.find({ userType: 'practitioner', accountStatus: { $ne: 'suspended' }, professionalStatus: { $ne: 'inactive' }, verificationStatus: 'verified' }).select('name email phone practiceAreas availabilitySchedule professionalStatus verificationStatus').sort({ name: 1 }).lean();
     res.json({ practitioners });
   } catch (_error) { res.status(500).json({ message: 'Unable to load practitioner availability' }); }
+});
+
+// Receptionists may view approved therapy instructions needed to schedule care.
+// Assessment notes and other restricted clinical history are intentionally omitted.
+router.get('/patients/:patientId/approved-treatment-plans', async (req, res) => {
+  try {
+    if (!mongoose.isValidObjectId(req.params.patientId)) return res.status(400).json({ message: 'Invalid patient id' });
+    const patient = await User.findOne({ _id: req.params.patientId, userType: 'patient', accountStatus: { $ne: 'suspended' } }).select('_id');
+    if (!patient) return res.status(404).json({ message: 'Patient not found or inactive' });
+    const plans = await TreatmentPlan.find({ patient: patient._id, status: 'approved' })
+      .select('title startDate therapies status generatedAt')
+      .sort({ createdAt: -1 }).lean();
+    const planIds = plans.map((plan) => plan._id);
+    const sessions = planIds.length ? await TherapySession.find({ treatmentPlan: { $in: planIds } }).select('treatmentPlan planSessionKey').lean() : [];
+    const enrichedPlans = plans.map((plan) => ({ ...plan, therapies: plan.therapies.map((therapy, therapyIndex) => {
+      const scheduledOccurrences = new Set();
+      for (const session of sessions) {
+        if (String(session.treatmentPlan) !== String(plan._id) || typeof session.planSessionKey !== 'string') continue;
+        const generated = session.planSessionKey.match(/^(\d+):(\d+)$/);
+        if (generated && Number(generated[1]) === therapyIndex) scheduledOccurrences.add(Number(generated[2]));
+        const manual = session.planSessionKey.match(new RegExp(`^reception:${String(therapy._id)}:(\\d+)$`));
+        if (manual) scheduledOccurrences.add(Number(manual[1]));
+      }
+      return { ...therapy, scheduledOccurrences: [...scheduledOccurrences] };
+    }) }));
+    res.json({ plans: enrichedPlans });
+  } catch (_error) { res.status(500).json({ message: 'Unable to load approved treatment plans' }); }
+});
+
+// Return only published free slots that fit the selected approved-plan therapy.
+router.get('/therapy-availability', async (req, res) => {
+  try {
+    const { patientId, planId, therapyId, occurrence, date } = req.query;
+    if (![patientId, planId, therapyId].every((value) => mongoose.isValidObjectId(value)) || !validScheduleDate(date) || !/^\d+$/.test(String(occurrence))) return res.status(400).json({ message: 'Select a patient, approved plan, therapy occurrence and valid date' });
+    const [patient, plan] = await Promise.all([
+      User.findOne({ _id: patientId, userType: 'patient', accountStatus: { $ne: 'suspended' } }).select('_id'),
+      TreatmentPlan.findOne({ _id: planId, patient: patientId, status: 'approved' }).select('therapies').lean(),
+    ]);
+    if (!patient) return res.status(404).json({ message: 'Patient not found or inactive' });
+    if (!plan) return res.status(404).json({ message: 'Approved treatment plan not found for this patient' });
+    const therapy = plan.therapies.find((item) => String(item._id) === String(therapyId));
+    if (!therapy) return res.status(400).json({ message: 'Therapy is not part of this approved plan' });
+    const occurrenceIndex = Number(occurrence);
+    if (!Number.isInteger(occurrenceIndex) || occurrenceIndex < 0 || occurrenceIndex >= therapy.occurrences) return res.status(400).json({ message: 'Invalid occurrence for this prescribed therapy' });
+    const therapyIndex = plan.therapies.findIndex((item) => String(item._id) === String(therapyId));
+    const occurrenceKeys = [`${therapyIndex}:${occurrenceIndex}`, `reception:${therapy._id}:${occurrenceIndex}`];
+    if (await TherapySession.exists({ treatmentPlan: plan._id, planSessionKey: { $in: occurrenceKeys } })) return res.json({ practitioners: [] });
+    const durationMins = Number(therapy.catalogSnapshot?.durationMins || therapy.durationMins);
+    const dayStart = new Date(`${date}T00:00:00.000Z`);
+    const dayEnd = new Date(dayStart); dayEnd.setUTCDate(dayEnd.getUTCDate() + 1);
+    if (dayStart < new Date(new Date().setUTCHours(0, 0, 0, 0))) return res.json({ practitioners: [] });
+    const slots = await TherapySession.find({
+      patient: null, isBooked: false, status: 'scheduled', treatmentPlan: null,
+      sessionName: { $in: ['General Slot', 'Consultation Slot'] }, date: { $gte: dayStart, $lt: dayEnd },
+    }).populate('practitioner', 'name profileImageUrl practiceAreas qualifications availabilitySchedule professionalStatus verificationStatus accountStatus').sort({ startTime: 1 }).lean();
+    const practitionerIds = [...new Set(slots.filter((slot) => slot.practitioner?._id).map((slot) => String(slot.practitioner._id)))];
+    const occupied = practitionerIds.length ? await TherapySession.find({
+      date: { $gte: dayStart, $lt: dayEnd }, status: { $ne: 'cancelled' },
+      $or: [{ patient: patient._id }, { practitioner: { $in: practitionerIds } }],
+    }).select('patient practitioner startTime durationMins').lean() : [];
+    const eligible = new Map();
+    for (const slot of slots) {
+      const practitioner = slot.practitioner;
+      if (!practitioner || practitioner.accountStatus === 'suspended' || practitioner.professionalStatus === 'inactive' || practitioner.verificationStatus !== 'verified') continue;
+      if (!practitionerHasSkills(practitioner, therapy.catalogSnapshot?.requiredSkills || [])) continue;
+      if (Number(slot.durationMins || 60) < durationMins || !practitionerCoversTime(practitioner, slot.date, slot.startTime, durationMins)) continue;
+      const clinicError = await validateClinicSlot({ date: slot.date, startTime: slot.startTime, durationMins });
+      if (clinicError) continue;
+      const hasConflict = occupied.some((item) => String(item._id) !== String(slot._id) &&
+        (String(item.patient || '') === String(patient._id) || String(item.practitioner || '') === String(practitioner._id)) &&
+        overlaps(slot.startTime, durationMins, item.startTime, item.durationMins || 60));
+      if (hasConflict) continue;
+      const key = String(practitioner._id);
+      if (!eligible.has(key)) eligible.set(key, { _id: practitioner._id, name: practitioner.name, profileImageUrl: practitioner.profileImageUrl, practiceAreas: practitioner.practiceAreas || [], slots: [] });
+      eligible.get(key).slots.push({ _id: slot._id, date: slot.date, startTime: slot.startTime, durationMins });
+    }
+    res.json({ practitioners: [...eligible.values()] });
+  } catch (_error) { res.status(500).json({ message: 'Unable to load therapy availability' }); }
+});
+
+router.post('/therapy-sessions', async (req, res) => {
+  let dbSession;
+  try {
+    const { patientId, planId, therapyId, occurrence, slotId } = req.body;
+    if (![patientId, planId, therapyId, slotId].every((value) => mongoose.isValidObjectId(value)) || !Number.isInteger(occurrence) || occurrence < 0) return res.status(400).json({ message: 'Select a patient, approved therapy occurrence and available appointment slot' });
+    dbSession = await mongoose.startSession();
+    let created;
+    await dbSession.withTransaction(async () => {
+      const [patient, plan] = await Promise.all([
+        User.findOne({ _id: patientId, userType: 'patient', accountStatus: { $ne: 'suspended' } }).select('_id').session(dbSession),
+        TreatmentPlan.findOne({ _id: planId, patient: patientId, status: 'approved' }).session(dbSession),
+      ]);
+      if (!patient) { const error = new Error('Patient not found or inactive'); error.status = 404; throw error; }
+      if (!plan) { const error = new Error('Approved treatment plan not found for this patient'); error.status = 404; throw error; }
+      const therapyIndex = plan.therapies.findIndex((item) => String(item._id) === String(therapyId));
+      if (therapyIndex < 0) { const error = new Error('Therapy is not part of this approved plan'); error.status = 400; throw error; }
+      const therapy = plan.therapies[therapyIndex];
+      if (occurrence >= therapy.occurrences) { const error = new Error('Invalid occurrence for this prescribed therapy'); error.status = 400; throw error; }
+      const slot = await TherapySession.findOne({ _id: slotId, patient: null, isBooked: false, status: 'scheduled', treatmentPlan: null, sessionName: { $in: ['General Slot', 'Consultation Slot'] } }).session(dbSession);
+      if (!slot) { const error = new Error('This published appointment slot is no longer available'); error.status = 409; throw error; }
+      const durationMins = Number(therapy.catalogSnapshot?.durationMins || therapy.durationMins);
+      if (Number(slot.durationMins || 60) < durationMins) { const error = new Error('The available slot is shorter than the prescribed therapy duration'); error.status = 409; throw error; }
+      const practitioner = await User.findOne({ _id: slot.practitioner, userType: 'practitioner', accountStatus: { $ne: 'suspended' }, professionalStatus: { $ne: 'inactive' }, verificationStatus: 'verified' }).select('name practiceAreas qualifications availabilitySchedule').session(dbSession);
+      if (!practitioner) { const error = new Error('Vaidya is no longer active or verified'); error.status = 409; throw error; }
+      if (!practitionerHasSkills(practitioner, therapy.catalogSnapshot?.requiredSkills || [])) { const error = new Error('Vaidya does not meet the prescribed therapy skill requirements'); error.status = 409; throw error; }
+      if (!practitionerCoversTime(practitioner, slot.date, slot.startTime, durationMins)) { const error = new Error('Vaidya is not available for the therapy duration at this time'); error.status = 409; throw error; }
+      const clinicError = await validateClinicSlot({ date: slot.date, startTime: slot.startTime, durationMins }, dbSession);
+      if (clinicError) { const error = new Error(clinicError); error.status = 400; throw error; }
+      await acquireScheduleLocks(dbSession, { date: slot.date, patientId: patient._id, practitionerId: practitioner._id });
+      const dayEnd = new Date(slot.date); dayEnd.setUTCDate(dayEnd.getUTCDate() + 1);
+      const existing = await TherapySession.find({
+        _id: { $ne: slot._id }, date: { $gte: new Date(slot.date), $lt: dayEnd }, status: { $ne: 'cancelled' },
+        $or: [{ patient: patient._id }, { practitioner: practitioner._id }],
+      }).select('startTime durationMins').session(dbSession);
+      if (existing.some((item) => overlaps(slot.startTime, durationMins, item.startTime, item.durationMins || 60))) { const error = new Error('Patient or Vaidya already has an overlapping session'); error.status = 409; throw error; }
+      const planSessionKeys = [`${therapyIndex}:${occurrence}`, `reception:${therapy._id}:${occurrence}`];
+      if (await TherapySession.exists({ treatmentPlan: plan._id, planSessionKey: { $in: planSessionKeys } }).session(dbSession)) { const error = new Error('This prescribed therapy occurrence has already been scheduled'); error.status = 409; throw error; }
+      const reservedSlot = await TherapySession.findOneAndUpdate(
+        { _id: slot._id, patient: null, isBooked: false, status: 'scheduled' },
+        { $set: { status: 'cancelled', cancelledReason: 'Reserved for an approved treatment-plan therapy session' }, $push: { statusHistory: { status: 'cancelled', changedBy: req.user._id, reason: 'Slot consumed by therapy assignment' } } },
+        { new: true, session: dbSession },
+      );
+      if (!reservedSlot) { const error = new Error('This appointment slot was just booked by someone else'); error.status = 409; throw error; }
+      [created] = await TherapySession.create([{
+        patient: patient._id, practitioner: practitioner._id, treatmentPlan: plan._id,
+        catalogTherapy: therapy.catalogTherapy || null, therapySnapshot: therapy.catalogSnapshot || undefined,
+        planSessionKey: `${therapyIndex}:${occurrence}`, therapyType: therapy.therapyType, phase: therapy.phase, sessionName: therapy.sessionName,
+        date: slot.date, startTime: slot.startTime, durationMins, notes: therapy.instructions || '',
+        status: 'scheduled', isBooked: true,
+        statusHistory: [{ status: 'scheduled', changedBy: req.user._id, reason: 'Scheduled by reception from an approved treatment plan' }],
+      }], { session: dbSession });
+    });
+    const result = await TherapySession.findById(created._id).populate('patient', 'name email phone').populate('practitioner', 'name email profileImageUrl').populate('treatmentPlan', 'title status startDate objectives precautions therapies').lean();
+    await notifyUsers([created.patient, created.practitioner], 'appointment-booked', 'Therapy session assigned', 'A therapy session from your approved treatment plan has been scheduled.', { dedupeKey: `appointment-booked:${created._id}` }).catch((error) => console.error('Therapy assignment notification failed:', error.name));
+    res.status(201).json({ session: result });
+  } catch (error) { res.status(error.status || (error.code === 11000 ? 409 : 500)).json({ message: error.status || error.code === 11000 ? error.message : 'Therapy session could not be scheduled' }); }
+  finally { if (dbSession) await dbSession.endSession(); }
 });
 
 router.get('/appointments', async (req, res) => {
@@ -176,7 +315,10 @@ router.patch('/appointments/:appointmentId', async (req, res) => {
         if (!current || !['scheduled', 'confirmed'].includes(current.status)) { const error = new Error('Appointment is no longer available to reschedule'); error.status = 409; throw error; }
         const replacement = await TherapySession.findOne({ _id: newSlotId, practitioner: current.practitioner, patient: null, isBooked: false, status: 'scheduled', treatmentPlan: null, sessionName: { $in: ['General Slot', 'Consultation Slot'] } }).session(dbSession);
         if (!replacement) { const error = new Error('The selected published slot is no longer available'); error.status = 409; throw error; }
-        const nextDate = replacement.date; const startTime = replacement.startTime; const durationMins = replacement.durationMins || current.durationMins || 60;
+        const nextDate = replacement.date; const startTime = replacement.startTime; const durationMins = current.durationMins || replacement.durationMins || 60;
+        if ((replacement.durationMins || 60) < durationMins) { const error = new Error('The replacement slot is shorter than this session duration'); error.status = 409; throw error; }
+        const practitioner = await User.findOne({ _id: current.practitioner, userType: 'practitioner', accountStatus: { $ne: 'suspended' }, professionalStatus: { $ne: 'inactive' }, verificationStatus: 'verified' }).select('availabilitySchedule').session(dbSession);
+        if (!practitioner || !practitionerCoversTime(practitioner, nextDate, startTime, durationMins)) { const error = new Error('Vaidya is unavailable for the replacement time'); error.status = 409; throw error; }
         const clinicError = await validateClinicSlot({ date: nextDate, startTime, durationMins }, dbSession);
         if (clinicError) { const error = new Error(clinicError); error.status = 400; throw error; }
         await acquireScheduleLocks(dbSession, { date: nextDate, patientId: current.patient, practitionerId: current.practitioner });

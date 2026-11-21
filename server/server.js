@@ -10,16 +10,17 @@ const session = require('express-session');
 
 const app = express();
 
-const mongoClientPromise = new Promise((resolve, reject) => {
+const mongoClientPromise = new Promise((resolve) => {
   const connection = mongoose.connection;
   if (connection.readyState === 1) return resolve(connection.getClient());
   const onConnected = () => {
     connection.off('error', onError);
     resolve(connection.getClient());
   };
-  const onError = (error) => {
-    connection.off('connected', onConnected);
-    reject(error);
+  const onError = () => {
+    // connectDB() owns startup failure reporting. Keep the session store's
+    // client promise pending until a later successful connection instead of
+    // producing a second, unhandled rejection during failed startup.
   };
   connection.once('connected', onConnected);
   connection.once('error', onError);

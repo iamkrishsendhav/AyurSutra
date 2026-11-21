@@ -8,6 +8,7 @@ const practitionerAuth = require('../middleware/practitionerAuth');
 const { overlaps, minuteOfDay } = require('../utils/sessionTime');
 const { canTransition } = require('../utils/sessionLifecycle');
 const { canManageSession, canCancelSession } = require('../utils/sessionAccess');
+const { practitionerCoversTime, practitionerHasSkills, validScheduleDate } = require('../utils/receptionTherapyScheduling');
 
 function responseMock() {
   return { statusCode: 200, body: null, status(code) { this.statusCode = code; return this; }, json(body) { this.body = body; return this; } };
@@ -93,7 +94,24 @@ test('session access enforces patient ownership and assigned practitioner identi
   assert.equal(canManageSession({ _id: 'patient-2', userType: 'patient' }, session), false);
   assert.equal(canManageSession({ _id: 'practitioner-1', userType: 'practitioner' }, session), true);
   assert.equal(canManageSession({ _id: 'practitioner-2', userType: 'practitioner' }, session), false);
+  const delegatedSession = { patient: { _id: 'patient-1', assignedPractitioner: 'primary-doctor' }, practitioner: 'execution-vaidya', status: 'scheduled' };
+  assert.equal(canManageSession({ _id: 'execution-vaidya', userType: 'practitioner' }, delegatedSession), true);
+  assert.equal(canManageSession({ _id: 'primary-doctor', userType: 'practitioner' }, delegatedSession), false);
   assert.equal(canManageSession({ _id: 'admin-1', userType: 'admin' }, session), true);
   assert.equal(canCancelSession({ _id: 'patient-1', userType: 'patient' }, session), true);
   assert.equal(canCancelSession({ _id: 'patient-1', userType: 'patient' }, { ...session, status: 'confirmed' }), false);
+});
+
+test('reception therapy scheduling validates published-slot availability, skills, and dates', () => {
+  const vaidya = {
+    practiceAreas: ['Abhyanga'],
+    availabilitySchedule: [{ dayOfWeek: 'Tuesday', startTime: '09:00', endTime: '13:00', isAvailable: true }],
+  };
+  const tuesday = new Date('2026-11-24T00:00:00.000Z');
+  assert.equal(practitionerCoversTime(vaidya, tuesday, '10:00', 90), true);
+  assert.equal(practitionerCoversTime(vaidya, tuesday, '12:00', 90), false);
+  assert.equal(practitionerHasSkills(vaidya, ['abhyanga']), true);
+  assert.equal(practitionerHasSkills(vaidya, ['Virechana']), false);
+  assert.equal(validScheduleDate('2026-11-25'), true);
+  assert.equal(validScheduleDate('2026-02-30'), false);
 });

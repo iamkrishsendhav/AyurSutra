@@ -232,7 +232,7 @@ const App = () => {
       case 'practitioner-availability':
         return userRole === 'practitioner' ? <PractitionerAvailability user={user} /> : null;
 
-      case 'reception-patients': case 'reception-appointments': case 'reception-checkin': case 'reception-availability':
+      case 'reception-patients': case 'reception-appointments': case 'reception-therapy-scheduling': case 'reception-checkin': case 'reception-availability':
         return userRole === 'receptionist' ? <ReceptionistDashboard user={user} view={activeTab} /> : null;
 
       case "practitioner-patients":

@@ -58,19 +58,19 @@ router.get("/", async (req, res) => {
       sessions = await TherapySession.find()
         .populate("patient", "name email phone")
         .populate('practitioner', 'name email profileImageUrl practiceAreas')
-        .populate('treatmentPlan', 'status startDate therapies')
+        .populate('treatmentPlan', 'title status startDate objectives precautions therapies')
         .sort({ date: 1, startTime: 1 });
     } else if (req.user.userType === "practitioner") {
       sessions = await TherapySession.find({ practitioner: req.user._id })
         .populate("patient", "name email phone")
         .populate('practitioner', 'name email profileImageUrl practiceAreas')
-        .populate('treatmentPlan', 'status startDate therapies')
+        .populate('treatmentPlan', 'title status startDate objectives precautions therapies')
         .sort({ date: 1, startTime: 1 });
     } else {
       sessions = await TherapySession.find({ patient: req.user._id })
         .populate("patient", "name email phone")
         .populate('practitioner', 'name email profileImageUrl practiceAreas')
-        .populate('treatmentPlan', 'status startDate therapies')
+        .populate('treatmentPlan', 'title status startDate objectives precautions therapies')
         .sort({ date: 1, startTime: 1 });
     }
 
@@ -211,13 +211,13 @@ router.put("/:id", async (req, res) => {
     const session = await TherapySession.findById(req.params.id).populate('patient');
     if (!session) return res.status(404).json({ msg: "Session not found" });
     const isPatient = req.user.userType === 'patient';
-    const isAssignedPractitioner = req.user.userType === 'practitioner';
     const isAdmin = req.user.userType === 'admin';
     if (!canManageSession(req.user, session)) return res.status(403).json({ msg: "Not authorized to edit this session" });
     if (isPatient && (session.status !== 'scheduled' || (status && status !== 'cancelled') || sessionName || phase || therapyType || notes)) {
       return res.status(403).json({ msg: 'Patients may only reschedule or cancel scheduled sessions' });
     }
-    if (isAssignedPractitioner && (session.patient?.assignedPractitioner && String(session.patient.assignedPractitioner) !== String(req.user._id))) return res.status(403).json({ msg: 'Patient is not assigned to this practitioner' });
+    // The specific session assignment authorizes its execution Vaidya. The patient's
+    // primary clinician can differ from the practitioner assigned to this session.
 
     // Preserve existing values if not provided
     if (!isPatient) {
@@ -401,7 +401,6 @@ router.patch('/:id/clinical-record', async (req, res) => {
     const session = await TherapySession.findById(req.params.id).populate('patient', 'assignedPractitioner name');
     if (!session) return res.status(404).json({ msg: 'Session not found' });
     if (!canManageSession(req.user, session)) return res.status(403).json({ msg: 'Not authorized to document this session' });
-    if (req.user.userType === 'practitioner' && session.patient?.assignedPractitioner && String(session.patient.assignedPractitioner) !== String(req.user._id)) return res.status(403).json({ msg: 'Patient is not assigned to this practitioner' });
     const allowed = ['observations', 'treatmentNotes', 'completionRemarks', 'followUpRecommendations'];
     for (const key of allowed) {
       if (req.body[key] !== undefined && (typeof req.body[key] !== 'string' || req.body[key].length > (key === 'completionRemarks' || key === 'followUpRecommendations' ? 3000 : 5000))) return res.status(400).json({ msg: `Invalid ${key}` });

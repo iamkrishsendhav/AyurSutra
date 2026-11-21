@@ -151,6 +151,11 @@ router.post('/:planId/generate-sessions', async (req, res) => {
         if (requiredSkills.length && requiredSkills.some((skill) => !practitionerSkills.includes(skill))) { const error = new Error(`Assigned practitioner does not meet the required skills for ${therapy.therapyType}`); error.status = 409; throw error; }
         if (!requiredSkills.length && !therapy.catalogTherapy && therapist.practiceAreas?.length && !therapist.practiceAreas.includes(therapy.therapyType)) { const error = new Error(`Assigned practitioner is not qualified for ${therapy.therapyType}`); error.status = 409; throw error; }
         for (let occurrence = 0; occurrence < therapy.occurrences; occurrence++) {
+          const existingOccurrence = await TherapySession.exists({
+            treatmentPlan: plan._id,
+            planSessionKey: { $in: [`${therapyIndex}:${occurrence}`, `reception:${therapy._id}:${occurrence}`] },
+          }).session(session);
+          if (existingOccurrence) continue;
           const date = new Date(plan.startDate); date.setHours(0, 0, 0, 0); date.setDate(date.getDate() + occurrence * therapy.frequencyDays);
           const dayEnd = new Date(date); dayEnd.setDate(dayEnd.getDate() + 1);
           const clinicError = await validateClinicSlot({ date, startTime: therapy.startTime, durationMins: therapy.catalogSnapshot?.durationMins || therapy.durationMins }, session);

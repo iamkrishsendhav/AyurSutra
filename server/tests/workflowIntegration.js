@@ -196,6 +196,50 @@ const main = async () => {
     assert.equal((await request(`/api/treatment-plans/${plan._id}/review`, doctor, 'POST', { decision: 'approved' })).status, 404);
     assert.equal((await TreatmentPlan.findById(plan._id).lean()).reviewHistory.length, 1);
 
+    // Reception schedules an individual approved-plan occurrence with a Vaidya
+    // different from the patient's primary clinician; that Vaidya owns execution.
+    await User.updateOne({ _id: secondDoctor._id }, { $set: { verificationStatus: 'verified', professionalStatus: 'active', practiceAreas: ['Virechana'] } });
+    const therapySlotDate = startDate.toISOString().slice(0, 10);
+    assert.equal((await request('/therapy/create', secondDoctor, 'POST', { date: therapySlotDate, times: ['10:00', '11:00'] })).status, 200);
+    const approvedPlans = await request(`/api/receptionist/patients/${patient._id}/approved-treatment-plans`, receptionist);
+    assert.equal(approvedPlans.status, 200);
+    assert.equal(approvedPlans.body.plans.find((item) => String(item._id) === String(plan._id)).status, 'approved');
+    assert.equal((await request(`/api/receptionist/patients/${patient._id}/approved-treatment-plans`, patient)).status, 403);
+    assert.equal((await request(`/api/receptionist/patients/${patient._id}/approved-treatment-plans`, otherDoctor)).status, 403);
+    const occurrenceQuery = `patientId=${patient._id}&planId=${plan._id}&therapyId=${plan.therapies[0]._id}&occurrence=0&date=${therapySlotDate}`;
+    const therapyAvailability = await request(`/api/receptionist/therapy-availability?${occurrenceQuery}`, receptionist);
+    assert.equal(therapyAvailability.status, 200);
+    assert.deepEqual(therapyAvailability.body.practitioners.map((item) => String(item._id)), [String(secondDoctor._id)]);
+    assert.equal((await request(`/api/receptionist/therapy-availability?${occurrenceQuery}`, doctor)).status, 403);
+    const chosenSlot = therapyAvailability.body.practitioners[0].slots.find((item) => item.startTime === '10:00');
+    assert.ok(chosenSlot);
+    let receptionTherapy = await request('/api/receptionist/therapy-sessions', receptionist, 'POST', { patientId: patient._id, planId: plan._id, therapyId: plan.therapies[0]._id, occurrence: 0, slotId: chosenSlot._id });
+    assert.equal(receptionTherapy.status, 201);
+    const receptionTherapySession = await TherapySession.findById(receptionTherapy.body.session._id).lean();
+    assert.equal(String(receptionTherapySession.patient), String(patient._id));
+    assert.equal(String(receptionTherapySession.practitioner), String(secondDoctor._id));
+    assert.equal(String(receptionTherapySession.treatmentPlan), String(plan._id));
+    assert.equal(receptionTherapySession.planSessionKey, '0:0');
+    assert.equal(receptionTherapySession.durationMins, 45);
+    assert.equal((await request('/sessions', secondDoctor)).body.some((item) => String(item._id) === String(receptionTherapySession._id)), true);
+    assert.equal((await request('/sessions', doctor)).body.some((item) => String(item._id) === String(receptionTherapySession._id)), false);
+    assert.equal((await request(`/api/receptionist/appointments?date=${therapySlotDate}`, receptionist)).body.appointments.some((item) => String(item._id) === String(receptionTherapySession._id)), true);
+    const duplicateOccurrenceSlot = therapyAvailability.body.practitioners[0].slots.find((item) => item.startTime === '11:00');
+    assert.ok(duplicateOccurrenceSlot);
+    receptionTherapy = await request('/api/receptionist/therapy-sessions', receptionist, 'POST', { patientId: patient._id, planId: plan._id, therapyId: plan.therapies[0]._id, occurrence: 0, slotId: duplicateOccurrenceSlot._id });
+    assert.equal(receptionTherapy.status, 409, 'a prescribed occurrence cannot be scheduled twice');
+    assert.equal((await request(`/api/receptionist/therapy-availability?${occurrenceQuery}`, receptionist)).body.practitioners.length, 0);
+    response = await request(`/sessions/${receptionTherapySession._id}`, secondDoctor, 'PUT', { status: 'confirmed' });
+    assert.equal(response.status, 200, 'the assigned Vaidya can accept the session even when the primary clinician differs');
+    response = await request(`/sessions/${receptionTherapySession._id}`, secondDoctor, 'PUT', { status: 'in-progress' });
+    assert.equal(response.status, 200);
+    response = await request(`/sessions/${receptionTherapySession._id}/clinical-record`, secondDoctor, 'PATCH', { treatmentNotes: 'Workflow test execution note' });
+    assert.equal(response.status, 200, 'the assigned Vaidya can save session notes');
+    response = await request(`/sessions/${receptionTherapySession._id}`, secondDoctor, 'PUT', { status: 'completed' });
+    assert.equal(response.status, 200);
+    assert.equal((await TherapySession.findById(receptionTherapySession._id).lean()).statusHistory.length, 4);
+    assert.equal((await request(`/sessions/${receptionTherapySession._id}`, doctor, 'PUT', { status: 'confirmed' })).status, 403, 'the primary clinician cannot execute another Vaidya\'s session');
+
     const adminPlanDate = new Date(startDate); adminPlanDate.setDate(adminPlanDate.getDate() + 10);
     response = await request(`/api/treatment-plans/patients/${patient.id}`, doctor, 'POST', { assessmentId: assessment._id, startDate: adminPlanDate.toISOString().slice(0, 10), therapies: [{ therapyType: 'Virechana', sessionName: 'Admin-reviewed test therapy', phase: 'Pre', durationMins: 45, frequencyDays: 1, occurrences: 1, startTime: '10:00' }] });
     assert.equal(response.status, 201); adminPlan = response.body.plan;
@@ -211,21 +255,24 @@ const main = async () => {
     assert.deepEqual(generated.map((x) => x.status).sort(), [201, 409]);
     const savedSessions = await TherapySession.find({ treatmentPlan: plan._id });
     assert.equal(savedSessions.length, 2);
-    assert.ok(savedSessions.every((x) => String(x.patient) === String(patient._id) && String(x.practitioner) === String(doctor._id)));
+    assert.ok(savedSessions.every((x) => String(x.patient) === String(patient._id)));
+    assert.ok(savedSessions.some((x) => String(x.practitioner) === String(secondDoctor._id) && x.planSessionKey === '0:0'));
+    assert.ok(savedSessions.some((x) => String(x.practitioner) === String(doctor._id) && x.planSessionKey === '0:1'));
     assert.equal((await request('/sessions', patient)).body.length, 2);
-    assert.equal((await request('/sessions', doctor)).body.length, 2);
+    assert.equal((await request('/sessions', doctor)).body.length, 1);
+    assert.equal((await request('/sessions', secondDoctor)).body.length, 1);
     assert.equal((await request('/sessions', admin)).body.length, 2);
     assert.equal((await request('/sessions', otherPatient)).body.length, 0);
     const patientDashboard = await request('/api/dashboard/patient', patient);
     assert.equal(patientDashboard.status, 200);
     assert.equal(patientDashboard.body.total, 2);
-    assert.equal(patientDashboard.body.completed, 0);
+    assert.equal(patientDashboard.body.completed, 1);
     assert.equal(patientDashboard.body.hasPractitioner, true);
     const practitionerDashboard = await request(`/api/dashboard/practitioner/${doctor.id}`, doctor);
     assert.equal(practitionerDashboard.status, 200);
-    assert.equal(practitionerDashboard.body.totalSessions, 2);
+    assert.equal(practitionerDashboard.body.totalSessions, 1);
     assert.equal(practitionerDashboard.body.completedSessions, 0);
-    assert.equal(practitionerDashboard.body.upcomingSessions.length, 2);
+    assert.equal(practitionerDashboard.body.upcomingSessions.length, 1);
     assert.equal((await request(`/api/dashboard/practitioner/${doctor.id}`, otherDoctor)).status, 403);
     assert.equal((await request(`/api/dashboard/practitioner/${doctor.id}`, patient)).status, 403);
     assert.equal((await request(`/api/dashboard/practitioner/${doctor.id}`, admin)).status, 200);
@@ -311,7 +358,8 @@ const main = async () => {
     assert.equal(rescheduled.scheduleHistory[0].changedBy.toString(), patient._id.toString());
 
     // Session execution record, one-time patient feedback, and follow-up ownership.
-    const executionSession = savedSessions[0];
+    const executionSession = savedSessions.find((item) => String(item.practitioner) === String(doctor._id));
+    assert.ok(executionSession, 'the primary clinician receives only the remaining unscheduled plan occurrence');
     response = await request(`/sessions/${executionSession._id}`, doctor, 'PUT', { status: 'confirmed' });
     assert.equal(response.status, 200);
     response = await request(`/sessions/${executionSession._id}`, doctor, 'PUT', { status: 'in-progress' });
