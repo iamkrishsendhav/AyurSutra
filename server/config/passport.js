@@ -1,19 +1,23 @@
 const passport = require("passport");
 const GoogleStrategy = require("passport-google-oauth20").Strategy;
 const User = require("../models/User");
-const config = require("./default.json");
 
 // Load environment variables
 require("dotenv").config();
 
 // Configure Google OAuth Strategy
-passport.use(
+const googleClientId = process.env.GOOGLE_CLIENT_ID;
+const googleClientSecret = process.env.GOOGLE_CLIENT_SECRET;
+const defaultGoogleCallbackURL = process.env.NODE_ENV === 'development'
+  ? 'http://localhost:5000/api/auth/google/callback'
+  : 'https://ayursutra-53m7.onrender.com/api/auth/google/callback';
+
+if (googleClientId && googleClientSecret) passport.use(
   new GoogleStrategy(
     {
-      clientID: process.env.GOOGLE_CLIENT_ID || config.googleClientId,
-      clientSecret:
-        process.env.GOOGLE_CLIENT_SECRET || config.googleClientSecret,
-      callbackURL: process.env.GOOGLE_CALLBACK_URL || config.googleCallbackURL,
+      clientID: googleClientId,
+      clientSecret: googleClientSecret,
+      callbackURL: process.env.GOOGLE_CALLBACK_URL || defaultGoogleCallbackURL,
     },
     async (accessToken, refreshToken, profile, done) => {
       try {
