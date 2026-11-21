@@ -126,6 +126,7 @@ const start = async () => {
     const server = app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
     return server;
   } catch (err) {
+    console.error("Server startup failed:", err?.stack || err?.message || String(err));
     process.exitCode = 1;
     return null;
   }
