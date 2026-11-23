@@ -48,6 +48,8 @@ const TherapySessionSchema = new mongoose.Schema({
   isBooked: { type: Boolean, default: false },
   checkedInAt: { type: Date },
   checkedInBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+  queueCalledAt: { type: Date },
+  queueCalledBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
   status: { 
     type: String, 
     enum: {
@@ -82,6 +84,7 @@ const TherapySessionSchema = new mongoose.Schema({
     to: { date: Date, startTime: String },
     changedAt: { type: Date, default: Date.now },
     changedBy: { type: mongoose.Schema.Types.ObjectId, ref: 'User' },
+    reason: { type: String, maxlength: 1000 },
   }],
   notes: { type: String },
   practitionerNotes: {

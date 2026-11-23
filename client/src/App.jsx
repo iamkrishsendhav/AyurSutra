@@ -41,6 +41,7 @@ const App = () => {
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [authChecking, setAuthChecking] = useState(() => Boolean(localStorage.getItem('token')));
   const [user, setUser] = useState(null);
+  const [globalPatientSearch, setGlobalPatientSearch] = useState('');
   const [selectedPatientId, setSelectedPatientId] = useState(null);
   const [showLanding, setShowLanding] = useState(false);
 
@@ -182,7 +183,7 @@ const App = () => {
     switch (activeTab) {
       case "dashboard":
         if (userRole === 'admin') return <AdminPanel user={user} initialTab="overview" />;
-        if (userRole === 'receptionist') return <ReceptionistDashboard user={user} view={activeTab} />;
+        if (userRole === 'receptionist') return <ReceptionistDashboard user={user} view={activeTab} patientSearch={globalPatientSearch} onPatientSearchChange={setGlobalPatientSearch} />;
         if (userRole === "practitioner") {
           return <PractitionerDashboard user={user} onNavigate={setActiveTab} onSelectPatient={(patientId) => {
             setSelectedPatientId(patientId);
@@ -232,8 +233,8 @@ const App = () => {
       case 'practitioner-availability':
         return userRole === 'practitioner' ? <PractitionerAvailability user={user} /> : null;
 
-      case 'reception-patients': case 'reception-appointments': case 'reception-therapy-scheduling': case 'reception-checkin': case 'reception-availability':
-        return userRole === 'receptionist' ? <ReceptionistDashboard user={user} view={activeTab} /> : null;
+      case 'reception-patients': case 'reception-appointments': case 'reception-therapy-scheduling': case 'reception-checkin': case 'reception-availability': case 'reception-reports':
+        return userRole === 'receptionist' ? <ReceptionistDashboard user={user} view={activeTab} patientSearch={globalPatientSearch} onPatientSearchChange={setGlobalPatientSearch} /> : null;
 
       case "practitioner-patients":
         if (userRole !== 'practitioner') return null;
@@ -329,15 +330,23 @@ const App = () => {
             setActiveTab={setActiveTab}
             user={user}
             onLogout={handleLogout}
+            globalPatientSearch={globalPatientSearch}
+            onGlobalPatientSearchChange={setGlobalPatientSearch}
           />
 
-          <Navigation activeTab={activeTab} setActiveTab={setActiveTab} userType={user?.userType} />
-
-          <div className="w-full bg-[#FDF7E9]">
-            <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-              {renderActiveTab()}
-            </main>
-          </div>
+          {user?.userType === 'receptionist' ? (
+            <div className="mx-auto flex max-w-[1600px] flex-col gap-4 px-4 py-4 sm:px-6 lg:flex-row lg:items-start lg:gap-6 lg:px-8">
+              <Navigation activeTab={activeTab} setActiveTab={setActiveTab} userType={user.userType} />
+              <main className="min-w-0 flex-1 py-2">{renderActiveTab()}</main>
+            </div>
+          ) : (
+            <>
+              <Navigation activeTab={activeTab} setActiveTab={setActiveTab} userType={user?.userType} />
+              <div className="w-full bg-[#FDF7E9]">
+                <main className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8">{renderActiveTab()}</main>
+              </div>
+            </>
+          )}
 
           {/* ✅ Floating chatbot widget for logged-in users except practitioners */}
           {isAuthenticated && user?.userType === "patient" && (

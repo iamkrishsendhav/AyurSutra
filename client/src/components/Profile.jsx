@@ -3,8 +3,9 @@ import authFetch from '../utils/apiClient';
 import { User, MapPin, Phone, Heart, Calendar, Users, Save, Edit3, Shield, CheckCircle, Clock, XCircle } from 'lucide-react';
 import { useToast } from '../contexts/ToastContext.jsx';
 import AvailabilityEditor from './scheduling/AvailabilityEditor';
+import PatientProfile from './patient/PatientProfile';
 
-const Profile = ({ user }) => {
+const RoleProfile = ({ user }) => {
   const [isEditing, setIsEditing] = useState(false);
   const [loading, setLoading] = useState(false);
   const [dataLoaded, setDataLoaded] = useState(false);
@@ -1047,5 +1048,7 @@ const Profile = ({ user }) => {
     </div>
   );
 };
+
+const Profile = ({ user }) => user?.userType === 'patient' ? <PatientProfile user={user} /> : <RoleProfile user={user} />;
 
 export default Profile;

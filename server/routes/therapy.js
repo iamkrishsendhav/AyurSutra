@@ -9,6 +9,7 @@ const mongoose = require('mongoose');
 const { acquireScheduleLocks } = require('../utils/scheduleLocks');
 const { validateClinicSlot, getClinicSettings } = require('../utils/clinicScheduling');
 const { notifyUsers } = require('../utils/notifications');
+const { getClinicDateBounds } = require('../utils/clinicDate');
 const clinicianAuth = (req, res, next) => ['practitioner', 'admin'].includes(req.user.userType) ? next() : res.status(403).json({ error: 'Practitioner access required' });
 router.use(auth);
 
@@ -126,12 +127,41 @@ router.get("/available", async (req, res) => {
   try {
     if (!['patient', 'practitioner', 'admin', 'receptionist'].includes(req.user.userType)) return res.status(403).json({ error: 'Access denied' });
     const filter = { isBooked: false, patient: null, status: 'scheduled', treatmentPlan: null, date: { $gte: new Date(new Date().setUTCHours(0, 0, 0, 0)) } };
+    if (req.query.date !== undefined) {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(req.query.date)) return res.status(400).json({ error: 'Choose a valid date.' });
+      const dateStart = new Date(`${req.query.date}T00:00:00.000Z`);
+      if (Number.isNaN(dateStart.getTime()) || dateStart.toISOString().slice(0, 10) !== req.query.date) return res.status(400).json({ error: 'Choose a valid date.' });
+      if (req.query.date < getClinicDateBounds().date) return res.status(400).json({ error: 'Availability date cannot be in the past.' });
+      const dateEnd = new Date(dateStart); dateEnd.setUTCDate(dateEnd.getUTCDate() + 1);
+      filter.date = { $gte: dateStart, $lt: dateEnd };
+    }
     if (req.query.practitionerId) {
       if (!mongoose.isValidObjectId(req.query.practitionerId)) return res.status(400).json({ error: 'Invalid practitioner' });
       filter.practitioner = req.query.practitionerId;
     }
-    const slots = await TherapySession.find(filter).populate("practitioner", "name practiceLocation practiceAreas qualifications availabilitySchedule profileImageUrl verificationStatus professionalStatus accountStatus").sort({ date: 1, startTime: 1 }).limit(300).lean();
-    res.json(slots.filter((slot) => slot.practitioner?.verificationStatus === 'verified' && slot.practitioner?.professionalStatus !== 'inactive' && slot.practitioner?.accountStatus !== 'suspended'));
+    const slots = await TherapySession.find(filter).select('_id practitioner date startTime durationMins therapyType phase sessionName status isBooked').populate("practitioner", "name practiceLocation practiceAreas qualifications availabilitySchedule profileImageUrl verificationStatus professionalStatus accountStatus").sort({ date: 1, startTime: 1 }).limit(300).lean();
+    const available = slots.filter((slot) => slot.practitioner?.verificationStatus === 'verified' && slot.practitioner?.professionalStatus !== 'inactive' && slot.practitioner?.accountStatus !== 'suspended' && practitionerCoversSlot(slot.practitioner, slot.date, slot.startTime, slot.durationMins || 60));
+    if (req.query.includeUnavailable !== 'true' || req.user.userType !== 'patient' || !req.query.date || !req.query.practitionerId) return res.json(available);
+
+    const eligiblePractitioner = await User.findOne({ _id: req.query.practitionerId, userType: 'practitioner', verificationStatus: 'verified', availableForNewPatients: true, professionalStatus: { $ne: 'inactive' }, accountStatus: { $ne: 'suspended' } }).select('_id').lean();
+    if (!eligiblePractitioner) return res.json([]);
+    const dateStart = filter.date.$gte;
+    const dateEnd = filter.date.$lt;
+    const bookedSlots = await TherapySession.find({
+      practitioner: req.query.practitionerId,
+      date: { $gte: dateStart, $lt: dateEnd },
+      treatmentPlan: null,
+      status: { $ne: 'cancelled' },
+      $and: [
+        { $or: [{ sessionName: { $in: ['General Slot', 'Consultation Slot', 'Clinic Appointment'] } }, { therapyType: { $in: ['Custom', 'Consultation'] } }] },
+        { $or: [{ isBooked: true }, { patient: { $ne: null } }, { status: { $ne: 'scheduled' } }] },
+      ],
+    }).select('_id date startTime durationMins').sort({ startTime: 1 }).limit(100).lean();
+    const visibleSlots = [
+      ...available.map((slot) => ({ _id: slot._id, date: slot.date, startTime: slot.startTime, durationMins: slot.durationMins, isAvailable: true })),
+      ...bookedSlots.map((slot) => ({ _id: `unavailable-${slot.startTime}`, date: slot.date, startTime: slot.startTime, durationMins: slot.durationMins, isAvailable: false })),
+    ].sort((first, second) => first.startTime.localeCompare(second.startTime));
+    return res.json(visibleSlots);
   } catch (err) {
     console.error("Error fetching slots:", err);
     res.status(500).json({ error: "Server error" });

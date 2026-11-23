@@ -1,7 +1,8 @@
-import React from "react";
-import { Layout, Calendar, Bell, TrendingUp, User, Search, Users, Shield, ClipboardList, BookOpen, Stethoscope, FileBarChart, HeartHandshake, Clock } from "lucide-react";
+import React, { useState } from "react";
+import { Layout, Calendar, Bell, TrendingUp, User, Search, Users, Shield, ClipboardList, BookOpen, Stethoscope, FileBarChart, HeartHandshake, Clock, ChevronLeft, ChevronRight } from "lucide-react";
 
 const Navigation = ({ activeTab, setActiveTab, userType }) => {
+  const [collapsed, setCollapsed] = useState(false);
   const baseTabs = [
     { id: "dashboard", label: "Dashboard", icon: Layout },
     { id: "scheduling", label: "Therapy Scheduling", icon: Calendar },
@@ -20,6 +21,34 @@ const Navigation = ({ activeTab, setActiveTab, userType }) => {
         : userType === 'admin'
         ? [baseTabs[0], baseTabs[2], baseTabs[4]]
         : baseTabs;
+
+  if (userType === 'receptionist') {
+    const receptionistTabs = [
+      { id: 'dashboard', label: 'Overview', icon: Layout },
+      { id: 'reception-patients', label: 'Patients', icon: Users },
+      { id: 'reception-appointments', label: 'Appointments', icon: Calendar },
+      { id: 'reception-therapy-scheduling', label: 'Therapy assignment', icon: ClipboardList },
+      { id: 'reception-checkin', label: 'Check-in & queue', icon: Clock },
+      { id: 'reception-availability', label: 'Vaidya schedule', icon: Stethoscope },
+      { id: 'reception-reports', label: 'Reports', icon: FileBarChart },
+      { id: 'notifications', label: 'Notifications', icon: Bell },
+      { id: 'profile', label: 'My profile', icon: User },
+    ];
+    return <>
+      <nav aria-label="Reception workspace navigation" className="horizontal-scroll mb-4 overflow-x-auto rounded-xl lg:hidden">
+        <div className="as-tabbar">{receptionistTabs.map(({ id, label, icon: Icon }) => <button key={id} type="button" onClick={() => setActiveTab(id)} aria-current={activeTab === id ? 'page' : undefined} className="as-nav-tab"><Icon aria-hidden="true" className="h-4 w-4 shrink-0"/>{label}</button>)}</div>
+      </nav>
+      <aside className={`hidden shrink-0 transition-[width] duration-200 lg:sticky lg:top-4 lg:block ${collapsed ? 'lg:w-[4.5rem]' : 'lg:w-60'}`}>
+        <div className="rounded-2xl border border-amber-200 bg-white/90 p-2 shadow-sm">
+          <div className={`flex items-center gap-2 px-2 py-3 ${collapsed ? 'justify-center' : 'justify-between'}`}>
+            {!collapsed && <div><p className="text-[10px] font-semibold uppercase tracking-[0.14em] text-amber-700">Clinic operations</p><p className="mt-0.5 text-sm font-semibold text-amber-950">Reception desk</p></div>}
+            <button type="button" onClick={() => setCollapsed((value) => !value)} aria-label={collapsed ? 'Expand reception navigation' : 'Collapse reception navigation'} aria-expanded={!collapsed} className="rounded-lg p-2 text-amber-800 hover:bg-amber-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-600">{collapsed ? <ChevronRight className="h-4 w-4"/> : <ChevronLeft className="h-4 w-4"/>}</button>
+          </div>
+          <div className="space-y-1">{receptionistTabs.map(({ id, label, icon: Icon }) => <button key={id} type="button" onClick={() => setActiveTab(id)} aria-current={activeTab === id ? 'page' : undefined} title={collapsed ? label : undefined} className={`flex min-h-11 w-full items-center gap-3 rounded-xl px-3 text-left text-sm transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-amber-600 ${activeTab === id ? 'bg-amber-700 font-semibold text-white shadow-sm' : 'text-amber-900 hover:bg-amber-50'}`}><Icon aria-hidden="true" className="h-4 w-4 shrink-0"/><span className={collapsed ? 'sr-only' : 'truncate'}>{label}</span></button>)}</div>
+        </div>
+      </aside>
+    </>;
+  }
 
   return (
     <nav aria-label="Main navigation" className="w-full bg-[#FDF7E9] py-3">

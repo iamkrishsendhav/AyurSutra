@@ -9,6 +9,7 @@ const TreatmentPlan = require("../models/TreatmentPlan");
 const DoctorAssessment = require("../models/DoctorAssessment");
 const PatientFollowUp = require("../models/PatientFollowUp");
 const { getAssignedPatients } = require('../utils/practitionerPatients');
+const { getClinicDateBounds } = require('../utils/clinicDate');
 
 const isConsultationSession = (session) => !session.treatmentPlan && (
   ['Clinic Appointment', 'General Slot', 'Consultation Slot'].includes(session.sessionName) ||
@@ -25,20 +26,23 @@ router.get("/patient", auth, async (req, res) => {
 
     // Find sessions booked by this patient
     if (!patient || patient.userType !== "patient") return res.status(404).json({ message: "Patient not found" });
-    const [sessions, plans, assessmentCount, followUps, latestNotifications, unreadMessages] = await Promise.all([
+    const [sessions, plans, assessmentCount, followUps, pendingFollowUpCount, latestNotifications, unreadMessages] = await Promise.all([
       TherapySession.find({ patient: patientId }).populate('practitioner', 'name practiceLocation').sort({ date: 1, startTime: 1 }).lean(),
-      TreatmentPlan.find({ patient: patientId }).sort({ createdAt: -1 }).lean(),
+      TreatmentPlan.find({ patient: patientId }).populate('doctor', 'name').sort({ createdAt: -1 }).lean(),
       DoctorAssessment.countDocuments({ patient: patientId }),
       PatientFollowUp.find({ patient: patientId }).populate('practitioner', 'name').populate('session', 'sessionName therapyType date startTime').sort({ dueAt: 1 }).limit(20).lean(),
+      PatientFollowUp.countDocuments({ patient: patientId, status: 'pending' }),
       Notification.find({ user: patientId }).sort({ scheduledAt: -1 }).limit(5).select('type payload read scheduledAt').lean(),
       Message.countDocuments({ to: patientId, read: false }),
     ]);
     const now = new Date();
+    const { calendarStart: clinicDayStart } = getClinicDateBounds(now);
     const therapySessions = sessions.filter((session) => !isConsultationSession(session));
+    const consultationSessions = sessions.filter(isConsultationSession);
     const completed = therapySessions.filter((session) => session.status === 'completed').length;
     const total = therapySessions.length;
     const cancelled = therapySessions.filter((session) => session.status === 'cancelled').length;
-    const upcomingSessions = sessions.filter((session) => ['scheduled', 'confirmed'].includes(session.status) && new Date(session.date) >= new Date(now.setHours(0, 0, 0, 0))).sort((a, b) => new Date(a.date) - new Date(b.date));
+    const upcomingSessions = sessions.filter((session) => ['scheduled', 'confirmed'].includes(session.status) && new Date(session.date) >= clinicDayStart).sort((a, b) => new Date(a.date) - new Date(b.date) || String(a.startTime || '').localeCompare(String(b.startTime || '')));
     const therapyUpcoming = upcomingSessions.filter((session) => !isConsultationSession(session));
     const consultationUpcoming = upcomingSessions.filter(isConsultationSession);
     const patientSessionView = (session) => session ? {
@@ -47,17 +51,39 @@ router.get("/patient", auth, async (req, res) => {
       practitioner: session.practitioner, therapySnapshot: session.therapySnapshot, statusHistory: session.statusHistory,
       clinicalRecord: session.clinicalRecord ? { actualStartedAt: session.clinicalRecord.actualStartedAt, actualCompletedAt: session.clinicalRecord.actualCompletedAt, actualDurationMins: session.clinicalRecord.actualDurationMins } : undefined,
     } : null;
-    const activePlan = plans.find((plan) => ['approved', 'pending-approval', 'draft'].includes(plan.status)) || null;
+    // Patient-facing plan details are limited to approved prescriptions. Keep the
+    // latest plan status separately so the UI can explain a pending review.
+    const activePlan = plans.find((plan) => plan.status === 'approved') || null;
+    const latestPlanStatus = plans[0]?.status || null;
     const approvedPlans = plans.filter((plan) => plan.status === 'approved');
-    const plannedSessions = approvedPlans.reduce((sum, plan) => sum + (plan.therapies || []).reduce((therapySum, therapy) => therapySum + Number(therapy.occurrences || 0), 0), 0);
+    const plannedSessions = (activePlan?.therapies || []).reduce((sum, therapy) => sum + Number(therapy.occurrences || 0), 0);
+    const approvedPlanSessions = activePlan ? therapySessions.filter((session) => String(session.treatmentPlan || '') === String(activePlan._id)) : [];
+    const completedApprovedSessions = approvedPlanSessions.filter((session) => session.status === 'completed').length;
+    const inProgressApprovedSessions = approvedPlanSessions.filter((session) => session.status === 'in-progress').length;
     const profileFields = [patient.name, patient.phone, patient.personalDetails?.dateOfBirth, patient.personalDetails?.gender, patient.address?.city, patient.address?.state, patient.medicalHistory?.conditions?.length || patient.medicalHistory?.healthNotes, patient.emergencyContact?.name];
     const profileCompletion = Math.round(profileFields.filter(Boolean).length / profileFields.length * 100);
     const planSummary = activePlan ? {
       _id: activePlan._id,
+      title: activePlan.title,
       status: activePlan.status,
+      doctor: activePlan.doctor,
       startDate: activePlan.startDate,
       approval: activePlan.approval,
-      therapies: (activePlan.therapies || []).map(({ therapyType, sessionName, phase, occurrences, frequencyDays, durationMins, instructions, catalogSnapshot }) => ({ therapyType, sessionName, phase, occurrences, frequencyDays, durationMins: catalogSnapshot?.durationMins || durationMins, instructions, catalogSnapshot })),
+      therapies: (activePlan.therapies || []).map((therapy) => {
+        const matchingSessions = therapySessions.filter((session) => String(session.treatmentPlan || '') === String(activePlan._id) && session.sessionName === therapy.sessionName && session.therapyType === therapy.therapyType && session.phase === therapy.phase);
+        return {
+          therapyType: therapy.therapyType,
+          sessionName: therapy.sessionName,
+          phase: therapy.phase,
+          occurrences: therapy.occurrences,
+          frequencyDays: therapy.frequencyDays,
+          durationMins: therapy.catalogSnapshot?.durationMins || therapy.durationMins,
+          instructions: therapy.instructions,
+          catalogSnapshot: therapy.catalogSnapshot,
+          generatedSessions: matchingSessions.length,
+          completedSessions: matchingSessions.filter((session) => session.status === 'completed').length,
+        };
+      }),
       plannedSessions: (activePlan.therapies || []).reduce((sum, therapy) => sum + Number(therapy.occurrences || 0), 0),
       generatedAt: activePlan.generatedAt,
     } : null;
@@ -69,13 +95,18 @@ router.get("/patient", auth, async (req, res) => {
       wellnessScore: patient.wellnessScore > 0 ? patient.wellnessScore : null,
       nextSession: patientSessionView(therapyUpcoming[0]),
       nextConsultation: consultationUpcoming[0] ? { _id: consultationUpcoming[0]._id, date: consultationUpcoming[0].date, startTime: consultationUpcoming[0].startTime, status: consultationUpcoming[0].status, practitioner: consultationUpcoming[0].practitioner } : null,
+      upcomingAppointments: consultationUpcoming.slice(0, 5).map((session) => ({ _id: session._id, sessionName: session.sessionName, date: session.date, startTime: session.startTime, durationMins: session.durationMins, status: session.status, practitioner: session.practitioner })),
+      upcomingAppointmentCount: consultationUpcoming.length,
+      consultationCounts: { total: consultationSessions.length, completed: consultationSessions.filter((session) => session.status === 'completed').length },
       upcomingSessions: therapyUpcoming.slice(0, 5).map(patientSessionView),
-      sessionCounts: { planned: plannedSessions, generated: total, completed, upcoming: therapyUpcoming.length, cancelled, remainingToGenerate: Math.max(plannedSessions - total, 0) },
+      sessionCounts: { planned: plannedSessions, generated: total, completed, approvedPlanGenerated: approvedPlanSessions.length, approvedPlanCompleted: completedApprovedSessions, approvedPlanInProgress: inProgressApprovedSessions, remaining: Math.max(plannedSessions - completedApprovedSessions, 0), upcoming: therapyUpcoming.length, cancelled, remainingToGenerate: Math.max(plannedSessions - approvedPlanSessions.length, 0) },
       activePlan: planSummary,
-      planStatus: activePlan?.status || (plans.length ? plans[0].status : null),
+      planStatus: latestPlanStatus,
+      approvedPlanCount: approvedPlans.length,
       planCount: plans.length,
       assessmentCount,
       followUps: followUps.map(({ _id, dueAt, notes, status, practitioner, session, treatmentPlan }) => ({ _id, dueAt, notes, status, practitioner, session, treatmentPlan })),
+      pendingFollowUpCount,
       latestNotifications: latestNotifications.map(({ _id, type, payload, read, scheduledAt }) => ({ _id, type, title: payload?.title || type?.replaceAll('-', ' '), message: payload?.body || '', read, scheduledAt })),
       profileCompletion,
       nextMilestone: patient.progressHistory?.length ? patient.currentStage : null,

@@ -2,6 +2,7 @@ const express = require("express");
 const router = express.Router();
 const User = require("../models/User");
 const auth = require("../middleware/auth");
+const { validatePatientProfile } = require('../utils/patientProfileValidation');
 
 // ======================
 // Get User Profile
@@ -24,6 +25,7 @@ router.get("/", auth, async (req, res) => {
 // ======================
 router.put("/", auth, async (req, res) => {
   try {
+  const requestBody = req.body || {};
   const {
     name,
     phone,
@@ -42,7 +44,18 @@ router.put("/", auth, async (req, res) => {
     availableForNewPatients,
     bio,
     experience
-  } = req.body;
+  } = requestBody;
+
+    const currentUser = await User.findById(req.user._id);
+    if (!currentUser) return res.status(404).json({ message: 'User not found' });
+
+    if (currentUser.userType === 'patient') {
+      const { errors, updates } = validatePatientProfile(requestBody, currentUser);
+      if (Object.keys(errors).length) return res.status(400).json({ message: 'Please correct the highlighted fields.', errors });
+      const user = await User.findByIdAndUpdate(req.user._id, { $set: updates }, { new: true, runValidators: true }).select('-password -googleId');
+      if (!user) return res.status(404).json({ message: 'User not found' });
+      return res.json({ success: true, msg: 'Profile updated successfully', user });
+    }
 
     if (name !== undefined && (typeof name !== 'string' || name.trim().length > 120)) return res.status(400).json({ message: 'Name must be 120 characters or less' });
     if (phone !== undefined && (typeof phone !== 'string' || (phone && !/^\+?[0-9\s().-]{7,24}$/.test(phone)))) return res.status(400).json({ message: 'Enter a valid phone number' });
@@ -65,7 +78,6 @@ router.put("/", auth, async (req, res) => {
     if (licenseNumber !== undefined) updateData.licenseNumber = licenseNumber;
     
     // Practitioner-specific fields (only writable by practitioners)
-  const currentUser = await User.findById(req.user._id);
     if (currentUser && currentUser.userType === 'practitioner') {
       if (practiceAreas !== undefined) updateData.practiceAreas = practiceAreas;
       if (qualifications !== undefined) updateData.qualifications = qualifications;
@@ -175,7 +187,7 @@ router.put("/", auth, async (req, res) => {
       user
     });
   } catch (err) {
-    console.error("Update profile error:", err.message);
+    console.error('Profile update failed:', req.user?.userType === 'patient' ? err.name : err.message);
     res.status(500).json({ msg: 'Server error' });
   }
 });

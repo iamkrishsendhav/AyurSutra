@@ -7,7 +7,7 @@ const today = () => {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
 };
 
-export default function ReceptionistTherapyScheduling({ onScheduled }) {
+export default function ReceptionistTherapyScheduling({ onScheduled, refreshKey = 0 }) {
   const [patientQuery, setPatientQuery] = useState('');
   const [patients, setPatients] = useState([]);
   const [patientId, setPatientId] = useState('');
@@ -53,7 +53,7 @@ export default function ReceptionistTherapyScheduling({ onScheduled }) {
     }).catch((requestError) => { if (active) setError(requestError.message); })
       .finally(() => { if (active) setLoadingPlans(false); });
     return () => { active = false; };
-  }, [patientId]);
+  }, [patientId, refreshKey]);
 
   useEffect(() => {
     let active = true;
@@ -90,6 +90,8 @@ export default function ReceptionistTherapyScheduling({ onScheduled }) {
       if (!response.ok) throw new Error(body.message || 'Therapy session could not be scheduled');
       setNotice(`${therapy?.catalogSnapshot?.name || therapy?.therapyType} scheduled with ${practitioner?.name}.`);
       setSlotId('');
+      setPlans((items) => items.map((item) => item._id !== planId ? item : { ...item, therapies: item.therapies.map((entry) => entry._id !== therapyId ? entry : { ...entry, scheduledOccurrences: [...new Set([...(entry.scheduledOccurrences || []), Number(occurrence)])] }) }));
+      setOccurrence('');
       setPractitioners((items) => items.map((item) => item._id === practitionerId ? { ...item, slots: item.slots.filter((entry) => entry._id !== slotId) } : item));
       onScheduled?.(body.session);
     } catch (requestError) { setError(requestError.message); }

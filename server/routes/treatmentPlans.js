@@ -55,6 +55,7 @@ router.get('/patients/:patientId', async (req, res) => {
     if (!own && !(await canAccessPatient(req.user, patient))) return res.status(403).json({ message: 'Access denied' });
     const filter = { patient: patient._id };
     if (req.user.userType === 'practitioner') Object.assign(filter, { doctor: req.user._id });
+    if (own) filter.status = 'approved';
     if (req.user.userType === 'therapist') filter.status = 'approved';
     const plans = await TreatmentPlan.find(filter).sort({ createdAt: -1 }).lean();
     res.json({ plans });

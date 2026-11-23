@@ -139,6 +139,9 @@ const UserSchema = new mongoose.Schema(
         notes: { type: String, trim: true, maxlength: 2000 },
       },
       healthNotes: { type: String, trim: true, maxlength: 5000 },
+      // Patient-reported measurements; these are informational, not clinical readings.
+      heightCm: { type: Number, min: 30, max: 250, default: null },
+      weightKg: { type: Number, min: 2, max: 500, default: null },
     },
     address: {
       street: String,
@@ -162,11 +165,11 @@ const UserSchema = new mongoose.Schema(
       dateOfBirth: Date,
       gender: {
         type: String,
-        enum: ["male", "female", "other", "prefer_not_to_say"],
+        enum: ["male", "female", "other", "prefer_not_to_say", ""],
       },
       bloodGroup: {
         type: String,
-        enum: ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-", "Unknown"],
+        enum: ["A+", "A-", "B+", "B-", "AB+", "AB-", "O+", "O-", "Unknown", ""],
       },
     },
     // Practitioner-specific fields

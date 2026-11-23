@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Bell, ChevronDown, Leaf, LogOut, User } from 'lucide-react';
+import { Bell, ChevronDown, Leaf, LogOut, User, Search } from 'lucide-react';
 
-const Header = ({ userRole, notifications = [], unreadCount = 0, onMarkAllRead, user, onLogout, setActiveTab }) => {
+const Header = ({ userRole, notifications = [], unreadCount = 0, onMarkAllRead, user, onLogout, setActiveTab, globalPatientSearch = '', onGlobalPatientSearchChange }) => {
   const [showUserMenu, setShowUserMenu] = useState(false);
   const [showBell, setShowBell] = useState(false);
   const [actionError, setActionError] = useState('');
@@ -34,6 +34,12 @@ const Header = ({ userRole, notifications = [], unreadCount = 0, onMarkAllRead, 
         <div className="flex shrink-0 items-center gap-2.5"><span className="relative"><Leaf aria-hidden="true" className="h-9 w-9 text-amber-700"/><img src="/patterns/om-symbol.svg" alt="" className="absolute -right-1 -top-1 h-3.5 w-3.5 opacity-40"/></span><span className="font-decorative text-xl tracking-wide text-amber-950 sm:text-2xl">AyurSutra</span></div>
         <span className="hidden border-l border-amber-200 pl-4 text-sm font-medium text-amber-800 lg:block">Panchakarma Management</span>
       </div>
+
+      {role === 'receptionist' && <label className="order-3 flex basis-full items-center gap-2 rounded-xl border border-amber-200 bg-white/80 px-3 py-2 text-amber-700 shadow-sm md:order-none md:ml-auto md:basis-auto md:max-w-md md:flex-1">
+        <Search aria-hidden="true" className="h-4 w-4 shrink-0"/>
+        <span className="sr-only">Search patients by name, email, phone or patient ID</span>
+        <input value={globalPatientSearch} onChange={(event) => onGlobalPatientSearchChange?.(event.target.value)} onFocus={() => setActiveTab('reception-patients')} placeholder="Search patients by name, email, phone or ID" className="min-w-0 flex-1 border-0 bg-transparent p-0 text-sm text-amber-950 outline-none placeholder:text-amber-700/70 focus:ring-0" />
+      </label>}
 
       <div className="ml-auto flex shrink-0 items-center gap-1.5 sm:gap-3">
         <span className="hidden rounded-full border border-amber-200 bg-white/70 px-3 py-1.5 text-xs font-semibold capitalize text-amber-800 sm:inline-flex">{role}</span>

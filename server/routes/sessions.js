@@ -12,6 +12,7 @@ const { canTransition } = require('../utils/sessionLifecycle');
 const { canManageSession, canCancelSession } = require('../utils/sessionAccess');
 const { acquireScheduleLocks } = require('../utils/scheduleLocks');
 const { validateClinicSlot } = require('../utils/clinicScheduling');
+const { getClinicDateBounds } = require('../utils/clinicDate');
 const { notifyUsers, notifyAdmins } = require('../utils/notifications');
 const Notification = require('../models/Notification');
 
@@ -69,7 +70,7 @@ router.get("/", async (req, res) => {
     } else {
       sessions = await TherapySession.find({ patient: req.user._id })
         .populate("patient", "name email phone")
-        .populate('practitioner', 'name email profileImageUrl practiceAreas')
+        .populate('practitioner', 'name profileImageUrl practiceAreas practiceLocation qualifications')
         .populate('treatmentPlan', 'title status startDate objectives precautions therapies')
         .sort({ date: 1, startTime: 1 });
     }
@@ -207,15 +208,16 @@ router.post("/", async (req, res) => {
 // -------------------- PUT: Update session --------------------
 router.put("/:id", async (req, res) => {
   try {
-    const { date, startTime, notes, status, sessionName, phase, therapyType } = req.body;
+    const { date, startTime, notes, status, sessionName, phase, therapyType, newSlotId } = req.body;
     const session = await TherapySession.findById(req.params.id).populate('patient');
     if (!session) return res.status(404).json({ msg: "Session not found" });
     const isPatient = req.user.userType === 'patient';
     const isAdmin = req.user.userType === 'admin';
     if (!canManageSession(req.user, session)) return res.status(403).json({ msg: "Not authorized to edit this session" });
-    if (isPatient && (session.status !== 'scheduled' || (status && status !== 'cancelled') || sessionName || phase || therapyType || notes)) {
+    if (isPatient && (session.status !== 'scheduled' || (status && status !== 'cancelled') || sessionName || phase || therapyType || notes || ((date || startTime) && !newSlotId))) {
       return res.status(403).json({ msg: 'Patients may only reschedule or cancel scheduled sessions' });
     }
+    if (newSlotId !== undefined && !isPatient) return res.status(403).json({ msg: 'Published-slot rescheduling is available to the appointment owner' });
     // The specific session assignment authorizes its execution Vaidya. The patient's
     // primary clinician can differ from the practitioner assigned to this session.
 
@@ -280,6 +282,81 @@ router.put("/:id", async (req, res) => {
         const actualDurationMins = startedAt ? Math.max(0, Math.round((completedAt - new Date(startedAt)) / 60000)) : undefined;
         session.clinicalRecord = { ...(session.clinicalRecord?.toObject?.() || session.clinicalRecord || {}), actualCompletedAt: completedAt, ...(actualDurationMins !== undefined ? { actualDurationMins } : {}) };
       }
+    }
+
+    if (newSlotId !== undefined) {
+      if (!mongoose.isValidObjectId(newSlotId)) return res.status(400).json({ msg: 'Choose a valid published replacement slot' });
+      if (session.checkedInAt) return res.status(409).json({ msg: 'A checked-in appointment cannot be rescheduled' });
+      if (session.treatmentPlan || !(['Clinic Appointment', 'General Slot', 'Consultation Slot'].includes(session.sessionName) || ['Custom', 'Consultation', 'General Consultation'].includes(session.therapyType))) {
+        return res.status(409).json({ msg: 'Only consultation appointments can be rescheduled from this page' });
+      }
+      const reason = typeof req.body.rescheduleReason === 'string' ? req.body.rescheduleReason.trim() : '';
+      if (reason.length > 1000) return res.status(400).json({ msg: 'Reschedule reason must be 1000 characters or less' });
+      const dbSession = await mongoose.startSession();
+      let updated;
+      try {
+        await dbSession.withTransaction(async () => {
+          const current = await TherapySession.findOne({ _id: req.params.id, patient: req.user._id }).session(dbSession);
+          if (!current || current.status !== 'scheduled' || current.checkedInAt) { const error = new Error('This appointment is no longer eligible to reschedule'); error.status = 409; throw error; }
+          const replacement = await TherapySession.findOne({
+            _id: newSlotId, practitioner: current.practitioner, patient: null, isBooked: false,
+            status: 'scheduled', treatmentPlan: null,
+            $or: [{ sessionName: { $in: ['General Slot', 'Consultation Slot'] } }, { therapyType: { $in: ['Custom', 'Consultation'] } }],
+          }).session(dbSession);
+          if (!replacement) { const error = new Error('The selected published slot is no longer available'); error.status = 409; throw error; }
+          const durationMins = current.durationMins || 60;
+          if ((replacement.durationMins || 60) < durationMins) { const error = new Error('The replacement slot is shorter than this appointment'); error.status = 409; throw error; }
+          const practitioner = await User.findOne({ _id: current.practitioner, userType: 'practitioner', verificationStatus: 'verified', professionalStatus: { $ne: 'inactive' }, accountStatus: { $ne: 'suspended' } }).select('availabilitySchedule').session(dbSession);
+          if (!practitioner || !practitionerCoversTime(practitioner, replacement.date, replacement.startTime, durationMins)) { const error = new Error('The Vaidya is unavailable for this replacement time'); error.status = 409; throw error; }
+          const clinicError = await validateClinicSlot({ date: replacement.date, startTime: replacement.startTime, durationMins }, dbSession);
+          if (clinicError) { const error = new Error(clinicError); error.status = 400; throw error; }
+
+          const lockDates = [new Date(current.date), new Date(replacement.date)].sort((a, b) => a - b);
+          for (const lockDate of lockDates) await acquireScheduleLocks(dbSession, { date: lockDate, patientId: current.patient, practitionerId: current.practitioner });
+          const nextDate = new Date(replacement.date); nextDate.setUTCHours(0, 0, 0, 0);
+          const nextDayEnd = new Date(nextDate); nextDayEnd.setUTCDate(nextDayEnd.getUTCDate() + 1);
+          const conflicts = await TherapySession.find({
+            _id: { $nin: [current._id, replacement._id] }, date: { $gte: nextDate, $lt: nextDayEnd },
+            status: { $ne: 'cancelled' }, patient: { $ne: null },
+            $or: [{ practitioner: current.practitioner }, { patient: current.patient }],
+          }).select('startTime durationMins').session(dbSession);
+          if (conflicts.some((item) => overlaps(replacement.startTime, durationMins, item.startTime, item.durationMins || 60))) { const error = new Error('The patient or Vaidya already has an overlapping appointment'); error.status = 409; throw error; }
+
+          const oldDate = new Date(current.date); oldDate.setUTCHours(0, 0, 0, 0);
+          const oldDayEnd = new Date(oldDate); oldDayEnd.setUTCDate(oldDayEnd.getUTCDate() + 1);
+          const oldConflicts = await TherapySession.find({
+            _id: { $ne: current._id }, date: { $gte: oldDate, $lt: oldDayEnd },
+            status: { $ne: 'cancelled' },
+            $or: [{ practitioner: current.practitioner }, { patient: current.patient }],
+          }).select('startTime durationMins').session(dbSession);
+          const canReleaseOldSlot = oldDate >= new Date(`${getClinicDateBounds().date}T00:00:00.000Z`)
+            && practitionerCoversTime(practitioner, current.date, current.startTime, durationMins)
+            && !oldConflicts.some((item) => overlaps(current.startTime, durationMins, item.startTime, item.durationMins || 60))
+            && !await validateClinicSlot({ date: current.date, startTime: current.startTime, durationMins }, dbSession);
+
+          replacement.status = 'cancelled';
+          replacement.cancelledReason = `Reserved as replacement for appointment ${current._id}`;
+          replacement.statusHistory.push({ status: 'cancelled', changedBy: req.user._id, reason: 'Replacement slot consumed during patient rescheduling' });
+          await replacement.save({ session: dbSession });
+          current.scheduleHistory.push({ from: { date: current.date, startTime: current.startTime }, to: { date: replacement.date, startTime: replacement.startTime }, changedAt: new Date(), changedBy: req.user._id, ...(reason ? { reason } : {}) });
+          current.date = replacement.date;
+          current.startTime = replacement.startTime;
+          current.durationMins = durationMins;
+          updated = await current.save({ session: dbSession });
+          if (canReleaseOldSlot) await TherapySession.create([{
+            practitioner: current.practitioner, date: oldDate, startTime: session.startTime, durationMins,
+            therapyType: 'Custom', phase: 'Pre', sessionName: 'General Slot', status: 'scheduled', isBooked: false,
+          }], { session: dbSession });
+        });
+      } catch (error) {
+        if (error.status) return res.status(error.status).json({ msg: error.message });
+        if (error.code === 112 || error.code === 11000) return res.status(409).json({ msg: 'Appointment schedule changed concurrently. Refresh available times and try again.' });
+        console.error('Patient appointment reschedule failed:', error.name);
+        return res.status(500).json({ msg: 'Appointment could not be rescheduled' });
+      } finally { await dbSession.endSession(); }
+      await closePendingSessionReminders(updated._id, 'This session was rescheduled. Review the updated appointment details.');
+      await notifyUsers([updated.patient, updated.practitioner], 'appointment-rescheduled', 'Appointment rescheduled', `Your appointment is now scheduled for ${new Date(updated.date).toLocaleDateString()} at ${updated.startTime}.`, { dedupeKey: `appointment-rescheduled:${updated._id}:${updated.scheduleHistory?.at(-1)?.changedAt?.getTime?.() || Date.now()}` }).catch((error) => console.error('Patient appointment reschedule notification failed:', error.name));
+      return res.json({ msg: 'Appointment rescheduled', session: patientSafeSession(updated) });
     }
 
     // Date/Time update (reschedule): perform safe partial update to avoid full
