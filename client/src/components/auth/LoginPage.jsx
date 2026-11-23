@@ -70,6 +70,10 @@ const LoginPage = ({
         }),
       });
 
+      const contentType = res.headers.get("content-type") || "";
+      if (!contentType.includes("application/json")) {
+        throw new Error(`Login API returned ${contentType || "an unexpected response"} (HTTP ${res.status})`);
+      }
       const data = await res.json();
 
       if (res.ok) {
@@ -104,7 +108,9 @@ const LoginPage = ({
       console.error("Login error:", err);
       show({
         title: "Error",
-        message: "Something went wrong. Please try again.",
+        message: err.message.includes("Login API returned")
+          ? "The login service returned an unexpected response. Make sure the backend is running, then try again."
+          : "Something went wrong. Please try again.",
         duration: 4000,
       });
     }

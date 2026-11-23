@@ -13,29 +13,11 @@ async function createAdminUser() {
 
   try {
     await connectDB();
-    let admin = await User.findOne({ email });
-    const promoteExistingPatient = process.argv.includes('--promote-existing-patient');
-    if (admin && admin.userType !== 'admin' && !(admin.userType === 'patient' && promoteExistingPatient)) {
-      throw new Error('ADMIN_EMAIL belongs to a non-admin account; no changes were made');
-    }
-    if (!admin) {
-      const existingAdmins = await User.find({ userType: 'admin' }).select('_id').limit(2).lean();
-      if (existingAdmins.length > 1) throw new Error('Multiple admin accounts exist; specify the intended account before changing admin credentials');
-      if (existingAdmins.length === 1) admin = await User.findById(existingAdmins[0]._id);
-    }
-
+    if (await User.exists({ email })) throw new Error('ADMIN_EMAIL already belongs to an account; no changes were made');
+    if (await User.exists({ userType: 'admin' })) throw new Error('An admin account already exists; no changes were made');
     const passwordHash = await bcrypt.hash(password, 12);
-    if (admin) {
-      if (admin.userType === 'patient') admin.userType = 'admin';
-      admin.email = email;
-      admin.password = passwordHash;
-      admin.mustChangePassword = true;
-      await admin.save();
-      console.log('Admin credentials updated. Initial password was not printed; change it at first login.');
-    } else {
-      await User.create({ name: 'System Admin', email, password: passwordHash, userType: 'admin', accountStatus: 'active', mustChangePassword: true, verificationStatus: 'verified' });
-      console.log('Admin account created. Initial password was not printed; change it at first login.');
-    }
+    await User.create({ name: 'System Admin', email, password: passwordHash, userType: 'admin', accountStatus: 'active', mustChangePassword: true, verificationStatus: 'verified' });
+    console.log('Admin account created. Initial password was not printed; change it at first login.');
   } catch (error) {
     console.error(`Admin account provisioning failed (${error.code || error.name || 'unknown error'}).`);
     process.exitCode = 1;

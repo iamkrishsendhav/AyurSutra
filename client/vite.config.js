@@ -12,9 +12,10 @@ export default defineConfig({
   },
   server: {
     port: 3000,
+    strictPort: true,
     open: true,
     proxy: {
-      // forward API and auth calls to backend server during development
+      // Keep browser requests same-origin and forward them to the local API.
       '/api': {
         target: 'http://localhost:5000',
         changeOrigin: true,
